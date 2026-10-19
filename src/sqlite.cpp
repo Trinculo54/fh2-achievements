@@ -1,5 +1,5 @@
-// SQLite from Windows itself (System32\winsqlite3.dll, in every Windows 10 and 11), as the
-// platform does for its database patches, so the mod doesn't carry a copy. Read-only use.
+// SQLite from Windows itself (System32\winsqlite3.dll, in every Windows 10 and 11), as
+// FH2ML does for its database patches, so the mod doesn't carry a copy. Read-only use.
 #include "ach.hpp"
 
 #include <windows.h>

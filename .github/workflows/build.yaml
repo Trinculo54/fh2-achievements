@@ -1,9 +1,11 @@
 name: Build
 
-# Every push and pull request builds the mod and uploads dist/ as an
-# artifact. Pushing a version tag (v1.0.0, v1.2.3, ...) also attaches
-# Achievements-<tag>.zip to the release with that name (a new draft if
-# there isn't one yet), unless a zip is already attached.
+# Every push and pull request builds the mod and uploads dist/ (the FH2ML
+# package, mods/achievements/...) as an artifact. Pushing a version tag
+# (v1.0.0, v1.2.3, ...) also attaches Achievements-<tag>.zip to the release
+# with that name (a new draft if there isn't one yet), unless a zip is
+# already attached. The zip holds mods/achievements/, for the FH2ML
+# Manager's Install mod or to extract into the Azimuth folder.
 
 on:
   push:
@@ -26,7 +28,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-          submodules: true
 
       - name: Install llvm-mingw + ninja
         run: |
@@ -43,10 +44,14 @@ jobs:
       - name: Name the build
         id: name
         run: |
-          # The version in CMakeLists.txt is what the mod reports and compares
-          # against GitHub; a release tag has to match it.
+          # The version in CMakeLists.txt is what the mod reports to FH2ML and
+          # mod.json carries; a release tag has to match it.
           version=$(sed -n 's/^project([^ ]* VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           echo "CMakeLists.txt version: $version"
+          if ! grep -q "\"version\": \"$version\"" dist/mods/achievements/mod.json; then
+            echo "::error::dist/mods/achievements/mod.json doesn't say version $version."
+            exit 1
+          fi
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             tag="${GITHUB_REF_NAME#[vV]}"
             if [[ "$tag" != "$version" ]]; then

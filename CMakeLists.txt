@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-# Bump VERSION before tagging a release (the tag build checks they match).
-project(achievements VERSION 1.0.0 LANGUAGES C CXX RC)
+# Bump VERSION before tagging a release (the tag build checks they match). The DLL reports it
+# to FH2ML and mod.json carries it, both from here.
+project(achievements VERSION 1.1.0 LANGUAGES C CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,11 +22,12 @@ else()
     add_link_options(-static)
 endif()
 
-# The FH2 Mod Platform (git submodule): fh2mod.h.
-add_subdirectory(platform)
 configure_file(cmake/version.h.in ${CMAKE_BINARY_DIR}/generated/fh2_version.h)
+# mods\achievements\mod.json, with the same version as the DLL
+configure_file(cmake/mod.json.in ${CMAKE_BINARY_DIR}/mod.json @ONLY)
 
-# The mod: fh2-mods\Achievements.dll
+# The mod: mods\achievements\Achievements.dll, loaded by FH2ML through its v4 API
+# (third_party/fh2ml/FH2ML_v4.h, MIT: FH2ML provides every service, so there's nothing to link).
 add_library(achievements SHARED
     src/achievements.cpp
     src/ui.cpp
@@ -33,7 +35,7 @@ add_library(achievements SHARED
     src/save_reader.cpp
     src/sqlite.cpp
     src/version.rc)
-target_include_directories(achievements PRIVATE src ${CMAKE_BINARY_DIR}/generated)
+target_include_directories(achievements PRIVATE src third_party/fh2ml ${CMAKE_BINARY_DIR}/generated)
 target_compile_definitions(achievements PRIVATE ACH_VERSION="${PROJECT_VERSION}")
-target_link_libraries(achievements PRIVATE fh2mod_api bcrypt)
+target_link_libraries(achievements PRIVATE bcrypt)
 set_target_properties(achievements PROPERTIES OUTPUT_NAME Achievements PREFIX "")

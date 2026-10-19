@@ -1,8 +1,8 @@
 // Achievements: the mod. Hooks, the pop-ups, the unlock file and the worker thread that ties them
 // together; the rules are in rules.cpp, the save in save_reader.cpp. See ach.hpp for the idea.
 //
-// Game addresses are for the 24 Nov 2015 build Azimuth runs; the platform checks each hooked
-// byte against the exe on disk, and the two functions called directly are checked here.
+// Game addresses are for the 24 Nov 2015 build Azimuth runs; FH2ML checks each hooked byte
+// against the exe on disk, and the two functions called directly are checked here.
 //  - Telemetry events: EtwPlus.dll's EtxEventWrite through its import slot, game+0x1DD0060
 //    (event descriptor in rcx: id at +0, name at +0x10, field types at +0x20, field count in the
 //    low byte of +0x28; the EVENT_DATA_DESCRIPTORs are the 5th argument).
@@ -17,29 +17,33 @@
 //  - A tick on the game thread to show them from: AchievementsModule's update (vtable +0x20,
 //    0x1403FCD60, about 60 a second), hooked at 0x1403FCD84.
 #include "ach.hpp"
-#include "fh2mod.h"
+#include "FH2ML_v4.h"
 
 #include <windows.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cstdarg>
-#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <deque>
+#include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <mutex>
 #include <sstream>
+#include <utility>
 
 using namespace ach;
+namespace fs = std::filesystem;
 
 namespace {
 
-const FH2ModApi* g_api;
-FH2Mod* g_mod;
+const FH2ML_Services_v4* g_api;
+FH2ML_Mod* g_mod;
 uint8_t* g_base;
+// g_dir is the mod's data folder (FH2ML\data\achievements): settings, unlocks, the list and the log.
 std::wstring g_azimuth, g_gameDir, g_dir, g_iniPath;
 
 namespace rva {
@@ -53,7 +57,7 @@ constexpr uintptr_t MakeDisplayString = 0x323310, ShowNotif = 0x755330;
 const uint8_t kMakeDisplayStringBytes[] = {0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x28, 0xFE, 0xFF, 0xFF, 0xFF};
 const uint8_t kShowNotifBytes[] = {0x4C, 0x89, 0x4C, 0x24, 0x20, 0x4C, 0x89, 0x44, 0x24, 0x18, 0x48, 0x89, 0x54, 0x24, 0x10};
 
-// ---- log: fh2-mods\Achievements\Achievements.log ---------------------------------------------
+// ---- log: <data folder>\Achievements.log --------------------------------------------------------
 
 std::mutex g_logMu;
 std::string g_logBuf;
@@ -93,12 +97,19 @@ void flush_log() {
     CloseHandle(h);
 }
 
-void plog(const std::string& s) { g_api->log(g_mod, s.c_str()); }
+void plog(const std::string& s) { g_api->Log(g_mod, s.c_str()); }
 
 std::string narrow(const std::wstring& w) {
     std::string s;
     for (wchar_t c : w) s.push_back(c < 128 ? static_cast<char>(c) : '?');
     return s;
+}
+
+// A path for messages, from the Azimuth folder when it's inside it: "FH2ML\data\achievements\...".
+std::string shown(const std::wstring& path) {
+    fs::path p = fs::path(path).lexically_relative(g_azimuth);
+    if (p.empty() || *p.begin() == L"..") p = path;
+    return narrow(p.make_preferred().wstring());
 }
 
 bool sread(const void* p, void* out, size_t n) {
@@ -134,7 +145,7 @@ std::string now_utc() {
     return b;
 }
 
-// ---- settings: fh2-mods\Achievements.ini -----------------------------------------------------
+// ---- settings: <data folder>\Achievements.ini ------------------------------------------------
 
 std::atomic<bool> g_popupsOn{true};
 
@@ -292,7 +303,7 @@ std::mutex g_statMu;
 std::map<std::string, double> g_liveStats;
 std::atomic<uint32_t> g_statVersion{0};
 
-void on_set_stat(FH2Context* c, void*) {
+void on_set_stat(FH2ML_Registers* c, void*) {
     const char* name = reinterpret_cast<const char*>(c->rsi);
     const uint8_t* v = reinterpret_cast<const uint8_t*>(c->rbp);
     if (!name || !v) return;
@@ -316,12 +327,12 @@ std::mutex g_compMu;
 std::vector<uint8_t*> g_comps;   // live HUDMinorNotificationComponents, oldest first
 std::atomic<ULONGLONG> g_firstCompTick{0};
 
-void on_notif_ctor(FH2Context* c, void*) {
+void on_notif_ctor(FH2ML_Registers* c, void*) {
     std::lock_guard<std::mutex> lk(g_compMu);
     g_comps.push_back(reinterpret_cast<uint8_t*>(c->rbx));
     if (!g_firstCompTick) g_firstCompTick = GetTickCount64();
 }
-void on_notif_dtor(FH2Context* c, void*) {
+void on_notif_dtor(FH2ML_Registers* c, void*) {
     std::lock_guard<std::mutex> lk(g_compMu);
     auto it = std::find(g_comps.begin(), g_comps.end(), reinterpret_cast<uint8_t*>(c->rbx));
     if (it != g_comps.end()) g_comps.erase(it);
@@ -351,7 +362,7 @@ void queue_popup(const std::string& main, const std::string& sub) {
 }
 
 // Runs on the game thread about 60 times a second.
-void on_tick(FH2Context*, void*) {
+void on_tick(FH2ML_Registers*, void*) {
     if (!g_popupsOn || !g_ready) return;
     const ULONGLONG now = GetTickCount64();
     if (now < g_nextPopup) return;
@@ -385,7 +396,7 @@ void on_tick(FH2Context*, void*) {
     logf("pop-up shown: %s / %s", p.main.c_str(), p.sub.c_str());
 }
 
-// ---- the unlock file: fh2-mods\Achievements\<user>.ini -----------------------------------------
+// ---- the unlock file: <data folder>\<user>.ini -------------------------------------------------
 
 struct Store {
     std::map<std::string, std::string> unlocked;   // id -> when
@@ -428,16 +439,16 @@ bool save_store(const std::wstring& path, const Store& s) {
     return ok && MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }
 
-// ---- the in-game page (platform API 8) ------------------------------------------------------
+// ---- the in-game page (FH2ML's pages) -------------------------------------------------------
 
-bool g_pageOn = false;   // the platform has pages, and ours was added
+bool g_pageOn = false;   // ours was added
 
 std::string g_tileText;   // as last set
 int g_tileBand = -1;      // the wristband the tile shows, as last set
 void push_page(const Facts* f, const Store& s) {
     if (!g_pageOn) return;
     const PageXaml x = page_xaml(f, s.unlocked);
-    if (!g_api->set_page_xaml(g_mod, "List", x.resources.c_str(), x.content.c_str(), x.help.c_str())) logf("the page's XAML was refused");
+    if (!g_api->SetPageXaml(g_mod, "List", x.resources.c_str(), x.content.c_str(), x.help.c_str())) logf("the page's XAML was refused");
     // the Gamerscore on the pause menu's Achievements tile: "340 / 2,000G"
     int got = 0, all = 0;
     for (const Def& d : defs()) {
@@ -450,10 +461,8 @@ void push_page(const Facts* f, const Store& s) {
         return t;
     };
     const std::string text = thousands(got) + " / " + thousands(all) + "G";
-    // the tile's text and colours came with platform 2.7.0's API 8
-    if (g_api->size < offsetof(FH2ModApi, set_page_tile_colors) + sizeof(void*)) return;
     if (text != g_tileText) {
-        if (g_api->set_page_tile_text(g_mod, "List", text.c_str())) g_tileText = text;
+        if (g_api->SetPageTileText(g_mod, "List", text.c_str())) g_tileText = text;
         else logf("the tile's text was refused");
     }
     // ... in the colour of a wristband: the game's own, from media\GameTunableSettings\
@@ -477,7 +486,7 @@ void push_page(const Facts* f, const Store& s) {
     }
     const int band = offGot >= offAll ? 10 : std::min(9, offAll ? offGot * 10 / offAll : 0);
     if (band != g_tileBand) {
-        if (g_api->set_page_tile_colors(g_mod, "List", kBands[band].back, kBands[band].text)) {
+        if (g_api->SetPageTileColors(g_mod, "List", kBands[band].back, kBands[band].text)) {
             g_tileBand = band;
             logf("the Achievements tile is %s (%d of the %dG you can earn offline)", kBands[band].name, offGot, offAll);
         } else {
@@ -489,43 +498,43 @@ void push_page(const Facts* f, const Store& s) {
 // The section list's selection: the section to show. (It goes to -1 when the focus moves to the
 // cards: the shown section stays.)
 void on_page_slot(void*, const char* key, int slot, int value) {
-    if (slot == kSlotSelected && value >= 0) g_api->set_page_slot(g_mod, key, kSlotSection, value);
+    if (slot == kSlotSelected && value >= 0) g_api->SetPageSlot(g_mod, key, kSlotSection, value);
 }
 
 // A on a section: into its achievements. B there: back to the section. B on the sections leaves.
 // The pane changes first, so the sections stop (or start) taking the focus before it moves.
 int on_page_button(void*, const char* key, int button) {
-    const int pane = g_api->get_page_slot(g_mod, key, kSlotPane), sec = g_api->get_page_slot(g_mod, key, kSlotSection);
-    if (button == FH2_BUTTON_A) {
-        if (pane != 0) return FH2_PAGE_HANDLED;
-        g_api->set_page_slot(g_mod, key, kSlotPane, 1);
-        if (!g_api->focus_page_element(g_mod, key, ("Ach_Card_" + std::to_string(sec) + "_0").c_str())) {
-            g_api->set_page_slot(g_mod, key, kSlotPane, 0);
-            return FH2_PAGE_HANDLED;
+    const int pane = g_api->GetPageSlot(g_mod, key, kSlotPane), sec = g_api->GetPageSlot(g_mod, key, kSlotSection);
+    if (button == FH2ML_BUTTON_A) {
+        if (pane != 0) return FH2ML_PAGE_HANDLED;
+        g_api->SetPageSlot(g_mod, key, kSlotPane, 1);
+        if (!g_api->FocusPageElement(g_mod, key, ("Ach_Card_" + std::to_string(sec) + "_0").c_str())) {
+            g_api->SetPageSlot(g_mod, key, kSlotPane, 0);
+            return FH2ML_PAGE_HANDLED;
         }
-        return FH2_PAGE_HANDLED_SELECT;
+        return FH2ML_PAGE_HANDLED_SELECT;
     }
-    if (button == FH2_BUTTON_B && pane == 1) {
-        g_api->set_page_slot(g_mod, key, kSlotPane, 0);
-        g_api->focus_page_element(g_mod, key, sec == 0 ? "FirstItem" : ("Ach_Sec_" + std::to_string(sec)).c_str());
-        return FH2_PAGE_HANDLED_BACK;
+    if (button == FH2ML_BUTTON_B && pane == 1) {
+        g_api->SetPageSlot(g_mod, key, kSlotPane, 0);
+        g_api->FocusPageElement(g_mod, key, sec == 0 ? "FirstItem" : ("Ach_Sec_" + std::to_string(sec)).c_str());
+        return FH2ML_PAGE_HANDLED_BACK;
     }
     // LB and RB: the section before or after, wherever the focus is (on the cards, it stays on them)
-    if (button == FH2_BUTTON_LB || button == FH2_BUTTON_RB) {
-        const int next = sec + (button == FH2_BUTTON_RB ? 1 : -1);
-        if (next < 0 || next >= static_cast<int>(section_titles().size())) return FH2_PAGE_HANDLED;
+    if (button == FH2ML_BUTTON_LB || button == FH2ML_BUTTON_RB) {
+        const int next = sec + (button == FH2ML_BUTTON_RB ? 1 : -1);
+        if (next < 0 || next >= static_cast<int>(section_titles().size())) return FH2ML_PAGE_HANDLED;
         if (pane == 0) {   // the section list follows the focus, and the cards follow it (on_page_slot)
-            g_api->focus_page_element(g_mod, key, next == 0 ? "FirstItem" : ("Ach_Sec_" + std::to_string(next)).c_str());
+            g_api->FocusPageElement(g_mod, key, next == 0 ? "FirstItem" : ("Ach_Sec_" + std::to_string(next)).c_str());
         } else {           // the cards: the next section's, from the top
-            g_api->set_page_slot(g_mod, key, kSlotSection, next);
-            g_api->focus_page_element(g_mod, key, ("Ach_Card_" + std::to_string(next) + "_0").c_str());
+            g_api->SetPageSlot(g_mod, key, kSlotSection, next);
+            g_api->FocusPageElement(g_mod, key, ("Ach_Card_" + std::to_string(next) + "_0").c_str());
         }
-        return FH2_PAGE_HANDLED_SELECT;
+        return FH2ML_PAGE_HANDLED_SELECT;
     }
-    return FH2_PAGE_IGNORED;
+    return FH2ML_PAGE_IGNORED;
 }
 
-// fh2-mods\Achievements\Achievements.txt: the same list as a text file.
+// <data folder>\Achievements.txt: the same list as a text file.
 void write_list(const std::wstring& path, const Facts& f, const Store& s) {
     int got = 0, gs = 0, gsAll = 0;
     for (const Def& d : defs()) {
@@ -566,32 +575,32 @@ void write_list(const std::wstring& path, const Facts& f, const Store& s) {
 
 // ---- the worker -----------------------------------------------------------------------------
 
-FH2Hook* hook(const char* name, uintptr_t at, FH2InstructionFn fn) {
-    FH2Hook* h = g_api->hook_instruction(g_mod, name, g_base + at, fn, nullptr);
-    if (!h) logf("couldn't hook %s (see platform.log)", name);
+FH2ML_Hook* hook(const char* name, uintptr_t at, FH2ML_InstructionFn fn) {
+    FH2ML_Hook* h = g_api->HookInstruction(g_mod, name, g_base + at, fn, nullptr);
+    if (!h) logf("couldn't hook %s (see FH2ML\\logs\\FH2ML.log)", name);
     return h;
 }
 
 DWORD WINAPI worker(LPVOID) {
-    g_base = static_cast<uint8_t*>(g_api->wait_for_code(0xFFFFFFFFu));
+    g_base = static_cast<uint8_t*>(g_api->WaitForCode(0xFFFFFFFFu));
     if (!g_base) {
         logf("the game's code never became ready");
         flush_log();
         return 0;
     }
     int made = 0;
-    if (g_api->hook_pointer(g_mod, "EtxEventWrite (import slot)", reinterpret_cast<void**>(g_base + rva::EtxEventWriteSlot),
-                            reinterpret_cast<void*>(&etx_detour), reinterpret_cast<void**>(&o_etx)))
+    if (g_api->HookPointer(g_mod, "EtxEventWrite (import slot)", reinterpret_cast<void**>(g_base + rva::EtxEventWriteSlot),
+                           reinterpret_cast<void*>(&etx_detour), reinterpret_cast<void**>(&o_etx)))
         ++made;
     else
-        logf("couldn't hook the telemetry import (see platform.log): no event-based achievements");
+        logf("couldn't hook the telemetry import (see FH2ML\\logs\\FH2ML.log): no event-based achievements");
     made += hook("SetStat (after its enabled check)", rva::SetStatHook, &on_set_stat) != nullptr;
     made += hook("HUDMinorNotificationComponent constructor", rva::NotifCtor, &on_notif_ctor) != nullptr;
     made += hook("HUDMinorNotificationComponent destructor", rva::NotifDtor, &on_notif_dtor) != nullptr;
     made += hook("AchievementsModule update (pop-up tick)", rva::AchModUpdate, &on_tick) != nullptr;
-    g_api->enable_hooks(g_mod, nullptr);
+    g_api->EnableHooks(g_mod, nullptr);
     logf("%d of 5 hooks made", made);
-    plog(std::to_string(made) + " of 5 hooks made; logging to fh2-mods\\Achievements\\Achievements.log");
+    plog(std::to_string(made) + " of 5 hooks made; logging to " + shown(g_logPath));
 
     GameData gd;
     std::string why;
@@ -742,74 +751,112 @@ DWORD WINAPI worker(LPVOID) {
     }
 }
 
-}  // namespace
+// ---- start: FH2ML calls Initialize when Azimuth starts, on its own thread ---------------------
 
-FH2MOD_EXPORT int fh2mod_init(const FH2ModApi* api) {
-    if (!api || api->api_version < 7) return 1;
-    g_api = api;
-    g_t0 = GetTickCount64();
+// Once: copies the platform-era files (a file, or a folder's contents) into the data folder.
+// Files already there win. A marker file remembers that it was done.
+void import_from_platform(const FH2ML_ModContext_v4* c,
+                          std::initializer_list<std::pair<const wchar_t*, const wchar_t*>> items) {
+    std::error_code e;
+    const fs::path data = c->data_directory, marker = data / L"imported-from-fh2-mods.txt";
+    if (fs::exists(marker, e)) return;
+    for (auto [from, to] : items) {
+        const fs::path src = fs::path(c->services->azimuth_directory) / from, dst = data / to;
+        if (!fs::exists(src, e)) continue;
+        fs::create_directories(fs::is_directory(src, e) ? dst : dst.parent_path(), e);
+        fs::copy(src, dst, fs::copy_options::recursive | fs::copy_options::skip_existing, e);
+    }
+    std::ofstream(marker) << "Copied from the FH2 Mod Platform's folders on the first launch under FH2ML.\n";
+}
+
+int initialize(const FH2ML_ModContext_v4* c, void*) {
+    g_api     = c->services;
+    g_mod     = c->mod;
+    g_t0      = GetTickCount64();
+    g_azimuth = g_api->azimuth_directory;
+    g_gameDir = g_api->game_directory ? g_api->game_directory : L"";
+    g_dir     = c->data_directory;   // FH2ML\data\achievements: kept across updates
+    // The player's settings and unlocks from before FH2ML (fh2-mods\Achievements.ini and the
+    // fh2-mods\Achievements folder), copied once, before anything reads them.
+    import_from_platform(c, {{L"fh2-mods\\Achievements.ini", L"Achievements.ini"}, {L"fh2-mods\\Achievements", L"."}});
+
     // settings, with a commented file the first time
-    g_iniPath = std::wstring(api->azimuth_dir) + L"\\fh2-mods\\Achievements.ini";
+    g_iniPath = g_dir + L"\\Achievements.ini";
     if (GetFileAttributesW(g_iniPath.c_str()) == INVALID_FILE_ATTRIBUTES)
         std::ofstream(g_iniPath.c_str(), std::ios::binary)
-            << "; Achievements (fh2-mods\\Achievements.ini). Delete this file to get the defaults back.\r\n"
+            << "; Achievements (" << shown(g_iniPath) << "). Delete this file to get the defaults back.\r\n"
                "[Achievements]\r\n"
                "; 0 = no pop-up when you unlock an achievement (also under Pause > Settings > MODS)\r\n"
-               "Popups=1\r\n"
-               "; 0 = don't check GitHub for a newer version\r\n"
-               "CheckUpdates=1\r\n";
-    FH2ModInfo info{};
-    info.size             = sizeof info;
-    info.name             = "Achievements";
-    info.version          = ACH_VERSION;
-    info.github_repo      = "Trinculo54/fh2-achievements";
-    info.check_updates    = GetPrivateProfileIntW(L"Achievements", L"CheckUpdates", 1, g_iniPath.c_str());
-    info.platform_version = FH2MOD_PLATFORM_VERSION;
-    info.description      = "Forza Horizon 2's 88 achievements, earned offline, with the game's own pop-up. Progress "
-                            "already in your save counts. The pause menu's ACHIEVEMENTS tile lists them all.";
-    g_mod = api->register_mod(&info);
-    if (!g_mod) return 1;
+               "Popups=1\r\n";
 
-    g_azimuth = api->azimuth_dir;
-    g_gameDir = api->game_dir ? api->game_dir : L"";
-    g_dir     = g_azimuth + L"\\fh2-mods\\Achievements";
-    CreateDirectoryW(g_dir.c_str(), nullptr);
     CreateDirectoryW((g_dir + L"\\cache").c_str(), nullptr);
     g_logPath = g_dir + L"\\Achievements.log";
     HANDLE h = CreateFileW(g_logPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
     logf("Achievements %s", ACH_VERSION);
+    // Update checks are FH2ML's now: an older Achievements.ini's CheckUpdates=0 can't stop them.
+    if (GetPrivateProfileIntW(L"Achievements", L"CheckUpdates", 1, g_iniPath.c_str()) == 0) {
+        const std::string note = "CheckUpdates=0 in Achievements.ini doesn't do anything any more: to stop update checks "
+                                 "for this mod, set \"updateChecks\": false for \"" + std::string(c->id) +
+                                 "\" under \"mods\" in FH2ML\\config\\FH2ML.json";
+        logf("%s", note.c_str());
+        plog(note);
+    }
 
     g_popupsOn = GetPrivateProfileIntW(L"Achievements", L"Popups", 1, g_iniPath.c_str()) != 0;
-    FH2Setting s{};
+    FH2ML_Setting s{};
     s.size        = sizeof s;
     s.key         = "Popups";
     s.label       = "Achievement pop-ups";
     s.description = "Show the game's notification when you unlock an achievement.";
     s.value       = g_popupsOn ? 1 : 0;
     s.on_change   = &on_setting;
-    api->add_setting(g_mod, &s);
+    g_api->AddSetting(g_mod, &s);
 
     // The page: on the pause menu's ACHIEVEMENTS tile (and the Storm Island tab's), of the mod's
     // own design. Its XAML comes from the worker.
-    if (api->api_version >= 8) {
-        if (const std::string bad = section_check(); !bad.empty()) logf("the page's sections are wrong: %s", bad.c_str());
-        FH2Page p{};
-        p.size        = sizeof p;
-        p.key         = "List";
-        p.title       = "Achievements";
-        p.label       = "Achievements list";
-        p.description = "Every achievement, unlocked or not, with your progress towards the locked ones.";
-        p.tile        = "Achievements";
-        p.on_button   = &on_page_button;
-        p.on_slot     = &on_page_slot;
-        g_pageOn      = api->add_page(g_mod, &p) != 0;
-        if (g_pageOn) {
-            Store none;
-            push_page(nullptr, none);   // until the profile's been read: nothing unlocked
-        }
+    if (const std::string bad = section_check(); !bad.empty()) logf("the page's sections are wrong: %s", bad.c_str());
+    FH2ML_Page p{};
+    p.size        = sizeof p;
+    p.key         = "List";
+    p.title       = "Achievements";
+    p.label       = "Achievements list";
+    p.description = "Every achievement, unlocked or not, with your progress towards the locked ones.";
+    p.tile        = "Achievements";
+    p.on_button   = &on_page_button;
+    p.on_slot     = &on_page_slot;
+    g_pageOn      = g_api->AddPage(g_mod, &p) != 0;
+    if (g_pageOn) {
+        Store none;
+        push_page(nullptr, none);   // until the profile's been read: nothing unlocked
     }
 
-    if (HANDLE t = CreateThread(nullptr, 0, worker, nullptr, 0, nullptr)) CloseHandle(t);
-    return 0;
+    // The worker waits for the game's code, then hooks it and runs the rest.
+    HANDLE t = CreateThread(nullptr, 0, worker, nullptr, 0, nullptr);
+    if (!t) {
+        logf("couldn't start the worker thread");
+        flush_log();
+        return 0;
+    }
+    CloseHandle(t);
+    return 1;
+}
+
+const FH2ML_ModAPI_v4 kDescriptor{sizeof(FH2ML_ModAPI_v4),
+                                  FH2ML_API_VERSION_V4,
+                                  nullptr,
+                                  "Achievements",
+                                  ACH_VERSION,   // mod.json has the same one (both from CMakeLists.txt)
+                                  "Trinculo54/fh2-achievements",
+                                  "Forza Horizon 2's 88 achievements, earned offline, with the game's own pop-up. Progress "
+                                  "already in your save counts. The pause menu's ACHIEVEMENTS tile lists them all.",
+                                  0,
+                                  &initialize,
+                                  nullptr,
+                                  nullptr};
+
+}  // namespace
+
+FH2ML_V4_EXPORT const FH2ML_ModAPI_v4* FH2ML_GetModAPI_v4(uint32_t host_version) {
+    return host_version == FH2ML_API_VERSION_V4 ? &kDescriptor : nullptr;
 }

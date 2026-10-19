@@ -16,17 +16,24 @@ What you've already done counts: the first time you launch, everything your save
 
 ## Install
 
-You'll need Forza Horizon 2 running on PC through Azimuth. Download the latest zip from the [Releases](../../releases) page, close Azimuth, and extract the zip into your Azimuth folder, the one with `azimuth.exe` in it. You should end up with `d3dcompiler_47.dll` next to `azimuth.exe` and `Achievements.dll` inside a `fh2-mods` folder. Start the game.
+You'll need Forza Horizon 2 running on PC through Azimuth, with [FH2ML](https://github.com/Refilewski/FH2ML), the Forza Horizon 2 mod loader, and Forza Horizon 2 Extra Options. Download the latest zip from the [Releases](../../releases) page, then either:
+
+- in the FH2ML Manager, choose **Install mod** and pick the zip, or
+- close Azimuth and extract the zip into your Azimuth folder, the one with `azimuth.exe` in it. You should end up with `mod.json` and `Achievements.dll` in `mods\achievements`.
+
+Start the game.
+
+**Coming from Achievements 1.0.0, from before FH2ML?** Let the FH2ML Manager remove the old mod loader when it offers to, before you start the game, so the two versions don't both run. The first launch of this version copies your settings and unlocks into `FH2ML\data\achievements`; the old files are left as they were.
 
 ### Updates
 
-When a newer version is out, the title screen says so next to "PRESS (A) TO START". The mod asks GitHub at most every six hours; `CheckUpdates=0` in `fh2-mods\Achievements.ini` turns that off. The version you have is in the first line of `fh2-mods\Achievements\Achievements.log`.
+When a newer version is out, the title screen says so next to "PRESS (A) TO START". FH2ML asks GitHub at most every six hours; to turn that off for this mod, set `"updateChecks": false` for `"achievements"` under `"mods"` in `FH2ML\config\FH2ML.json`. The version you have is in the first line of `FH2ML\data\achievements\Achievements.log`.
 
 ### Using it with other FH2 mods
 
-`d3dcompiler_47.dll` is the [FH2 Mod Platform](https://github.com/Trinculo54/FH2-Mod-Platform), the shared base for FH2 mods. It loads every mod in the `fh2-mods` folder and lets them hook the game without stepping on each other. Every mod built on it ships the same file, so you can install them in any order and let them overwrite it. Achievements needs platform 2.7.0, the one in its zip, for its list and the tile; [WreckingBall](https://github.com/Trinculo54/WreckingBall), [WheresMyBuddy](https://github.com/Trinculo54/WheresMyBuddy) and [FH2 Universal Radio](https://github.com/Trinculo54/FH2-Universal-Radio) are built on it too.
+Achievements is an FH2ML mod. FH2ML loads every mod in the `mods` folder and lets them hook the game, change its text and database and add to its menus without stepping on each other, so FH2ML mods can be installed in any order. Each one keeps its own folder in `mods`, and its settings in `FH2ML\data`.
 
-**Playing with a racing wheel.** [fh2wheel](https://github.com/iamAzoDx/fh2wheel) ships its own `D3DCOMPILER_47.dll`, and only one can sit next to `azimuth.exe`. Install fh2wheel first, then extract this zip and let its `d3dcompiler_47.dll` overwrite fh2wheel's. Keep `fh2wheel.dll` and `fh2wheel-config.exe` next to `azimuth.exe`: the platform loads fh2wheel itself.
+**Playing with a racing wheel.** Achievements doesn't put anything next to `azimuth.exe`, so [fh2wheel](https://github.com/iamAzoDx/fh2wheel) installs as its own instructions say.
 
 ## What counts
 
@@ -44,31 +51,33 @@ A Wild Drivatar Appears! does both: bounty wins from before the mod come from th
 
 ## Settings
 
-`fh2-mods\Achievements.ini`, created the first time you launch:
+`FH2ML\data\achievements\Achievements.ini` (in your Azimuth folder), created the first time you launch:
 
 | Setting | Default | What it does |
 |---|---|---|
 | `Popups` | `1` | `0` turns the pop-ups off. Also under Pause > Settings > MODS. |
-| `CheckUpdates` | `1` | `0` stops the mod checking GitHub for a newer version. |
+
+Update checks are FH2ML's: see [Updates](#updates).
 
 ## Files
 
-`fh2-mods\Achievements\` holds, for each profile:
+`FH2ML\data\achievements\`, which FH2ML keeps when you update or uninstall the mod, holds the settings above and, for each profile:
 
 - `User_<id>.ini`: what you've unlocked and when, and the counts the mod keeps for the achievements it counts as you play. Delete it to start over.
 - `Achievements.txt`: the whole list as a text file, with your progress.
-- `Achievements.log`: what the mod did this launch. A working launch reads your save ("read save revision ...") within a few seconds of the game starting. If the tile does nothing or nothing unlocks, look here, and in `fh2-mods\platform.log`.
+- `Achievements.log`: what the mod did this launch. A working launch reads your save ("read save revision ...") within a few seconds of the game starting. If the tile does nothing or nothing unlocks, look here, and in `FH2ML\logs\FH2ML.log`.
 
 ## Build from source
 
-Built with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases) and CMake; the platform is a git submodule.
+Built with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases) and CMake, against FH2ML's v4 mod API (`third_party/fh2ml/FH2ML_v4.h`, MIT; FH2ML provides the services, so there's nothing else to build or link).
 
 ```bash
-git clone --recursive https://github.com/Trinculo54/fh2-achievements
+git clone https://github.com/Trinculo54/fh2-achievements
+cd fh2-achievements
 ./scripts/build.sh
 ```
 
-`dist/` then holds the zip's contents. GitHub Actions does the same on every push, and a tag like `v1.0.0` attaches the zip to a release. The version lives in `project(... VERSION x.y.z)` in `CMakeLists.txt`; bump it before tagging.
+`dist/` then holds the zip's contents: `mods/achievements/` with `mod.json`, `Achievements.dll`, `README.txt` and `LICENSE.txt`. GitHub Actions does the same on every push, and a tag like `v1.1.0` attaches the zip to a release. The version lives in `project(... VERSION x.y.z)` in `CMakeLists.txt`, and the DLL and `mod.json` both take it from there; bump it before tagging.
 
 How each achievement is worked out, and the game addresses the mod uses, are in the comments at the top of `src/rules.cpp` and `src/achievements.cpp`.
 

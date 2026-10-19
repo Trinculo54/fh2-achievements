@@ -390,7 +390,7 @@ bool read_revision(const std::wstring& revDir, const std::wstring& scratch, cons
 
 bool read_game_data(const std::wstring& gameDir, GameData& out, std::string& why) {
     out = GameData{};
-    // The platform's copy (with every mod's database changes) if there is one, else the game's.
+    // FH2ML's copy (with every mod's database changes) if there is one, else the game's.
     std::wstring path = gameDir + L"\\mediaoverride\\Stripped\\gamedbRC.slt";
     if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) path = gameDir + L"\\media\\Stripped\\gamedbRC.slt";
     Sql* db = sql_open_readonly(path, why);

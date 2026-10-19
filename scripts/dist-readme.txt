@@ -14,23 +14,30 @@ Requirements
 ~~~~~~~~~~~~
 
   - Forza Horizon 2 running through Azimuth.
+  - FH2ML, the Forza Horizon 2 mod loader:
+    https://github.com/Refilewski/FH2ML
+  - Forza Horizon 2 Extra Options.
 
 
 Install
 ~~~~~~~
 
+With the FH2ML Manager: Install mod, and pick this zip.
+
+Or by hand:
 1. Close Azimuth.
 2. Extract this zip into your Azimuth folder (the one with azimuth.exe).
    You should end up with:
-       d3dcompiler_47.dll            next to azimuth.exe
-       fh2-mods\Achievements.dll
+       mods\achievements\mod.json
+       mods\achievements\Achievements.dll
 3. Start the game. Achievements you've already earned in your save
    unlock on the first launch, with one pop-up for all of them.
 
-d3dcompiler_47.dll is the FH2 Mod Platform, the shared base for FH2 mods
-(https://github.com/Trinculo54/FH2-Mod-Platform). It loads every mod in
-fh2-mods, and every mod built on it ships the same file, so it's fine to
-overwrite. The list and the tile need platform 2.7.0, the one in this zip.
+Coming from Achievements 1.0.0, from before FH2ML? Let the FH2ML Manager
+remove the old mod loader when it offers to, before you start the game,
+so the two versions don't both run. The first launch of this version
+copies your settings and unlocks over; the old files are left as they
+were.
 
 
 In the game
@@ -63,23 +70,29 @@ co-op Bucket Lists). They're listed as ONLINE ONLY.
 Files
 ~~~~~
 
-  fh2-mods\Achievements.ini     settings (Popups=1, CheckUpdates=1)
-  fh2-mods\Achievements\        per profile: what you've unlocked and
-                                when (User_<id>.ini), the list as text
-                                (Achievements.txt) and a log
+FH2ML\data\achievements\ in your Azimuth folder holds what's yours, and
+is kept when you update or uninstall the mod:
+
+  Achievements.ini      settings (Popups=1)
+  User_<id>.ini         per profile: what you've unlocked and when
+  Achievements.txt      the list as text, with your progress
+  Achievements.log      what the mod did this launch (FH2ML's own log
+                        is FH2ML\logs\FH2ML.log)
 
 Delete your profile's User_<id>.ini to start over.
 
 When a newer version is out, the title screen says so after
-"PRESS (A) TO START".
+"PRESS (A) TO START". To stop the mod checking, set
+"updateChecks": false for "achievements" under "mods" in
+FH2ML\config\FH2ML.json.
 
 
 Uninstall
 ~~~~~~~~~
 
-Delete fh2-mods\Achievements.dll, fh2-mods\Achievements.ini and the
-fh2-mods\Achievements folder. Delete d3dcompiler_47.dll and fh2-mods too
-if no other FH2 mods use them.
+Uninstall it in the FH2ML Manager, or delete the mods\achievements
+folder. Your unlocks stay in FH2ML\data\achievements; delete that folder
+too if you want them gone.
 
 
 License

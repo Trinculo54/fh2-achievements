@@ -11,7 +11,7 @@
 //   - the gameplay events themselves, for the ones the save doesn't record (wins in a given car,
 //     skills in a given car, a skill chain on Storm Island). Those count from when the mod is
 //     installed, kept in its own file.
-// It never writes to the save. Unlocks go to fh2-mods\Achievements\<user>.ini.
+// It never writes to the save. Unlocks go to FH2ML\data\achievements\<user>.ini.
 #pragma once
 
 #include <cstdint>
@@ -172,7 +172,7 @@ bool read_game_data(const std::wstring& gameDir, GameData& out, std::string& why
 
 // ---- the in-game page (ui.cpp) -------------------------------------------------------------
 
-// The Achievements page, as the platform's set_page_xaml takes it: XAML of the mod's own design.
+// The Achievements page, as FH2ML's SetPageXaml takes it: XAML of the mod's own design.
 struct PageXaml {
     std::string resources, content, help;
 };
@@ -183,7 +183,7 @@ PageXaml page_xaml(const Facts* f, const std::map<std::string, std::string>& unl
 std::vector<std::string> section_titles();
 // "" if every achievement is in exactly one section, otherwise what's wrong.
 std::string section_check();
-// The page's slots (FH2Mod_Slot_<n> in its XAML).
+// The page's slots (FH2ML_Slot_<n> in its XAML).
 constexpr int kSlotSelected = 0;   // the section list's SelectedIndex: -1 while the focus is elsewhere
 constexpr int kSlotPane     = 1;   // where the focus is: 0 the sections, 1 the shown one's achievements
 constexpr int kSlotSection  = 2;   // the section shown: the last one selected

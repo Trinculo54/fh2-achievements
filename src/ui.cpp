@@ -1,4 +1,4 @@
-// The in-game Achievements page (platform API 8, a page of the mod's own design): what the pause
+// The in-game Achievements page (an FH2ML page of the mod's own design): what the pause
 // menu's ACHIEVEMENTS tile opens.
 //
 //   ACHIEVEMENTS                                   [trophy 21 / 88   330 / 2000G]
@@ -12,14 +12,14 @@
 //                                  |          ...  [=======-----] 12 / 50 roads     |
 //                                  +------------------------------------------------+
 //
-// Left, the sections: the platform's slot 0 is the list's SelectedIndex, which follows the focus
+// Left, the sections: the page's slot 0 is the list's SelectedIndex, which follows the focus
 // (the game's list items are selected only while focused, so it's -1 while the focus is on the
 // cards). Slot 2 is the section shown, set from slot 0 when it's a section (achievements.cpp), and
-// only that section's cards show on the right (FH2Mod_Slot_2_Is_<k>). A on a section moves the
+// only that section's cards show on the right (FH2ML_Slot_2_Is_<k>). A on a section moves the
 // focus into its cards, B comes back; slot 1 says which side has the focus, for the help bar. Everything is the game's own controls, styles and textures (UI.zip,
 // UI\textures\Anthem.zip), written out as static XAML each time the rows change.
 #include "ach.hpp"
-#include "fh2mod.h"
+#include "FH2ML_v4.h"
 
 #include <algorithm>
 #include <cmath>
@@ -377,7 +377,7 @@ PageXaml page_xaml(const Facts* f, const std::map<std::string, std::string>& unl
          // the page puts the focus back on OptionsList (its FocusManager.FocusedElement) when it's
          // elsewhere, if it can. (On MODS > Installed mods, OptionsList is hidden at such times.)
          list_open("OptionsList", "Ach_Item_Section", kLeftW, kH,
-                   " SelectedIndex=\"{Binding FH2Mod_Slot_" + std::to_string(kSlotSelected) + ", Mode=TwoWay}\" IsEnabled=\"{Binding FH2Mod_Slot_" +
+                   " SelectedIndex=\"{Binding FH2ML_Slot_" + std::to_string(kSlotSelected) + ", Mode=TwoWay}\" IsEnabled=\"{Binding FH2ML_Slot_" +
                        std::to_string(kSlotPane) + "_Is_0}\"");
     for (size_t k = 0; k < secs.size(); ++k) {
         int sGot = 0, sAll = 0;
@@ -391,7 +391,7 @@ PageXaml page_xaml(const Facts* f, const std::map<std::string, std::string>& unl
              "                                        <Grid Height=\"72\">\r\n"
              // the selected section, while the focus is on its cards: a bar down the left
              "                                            <local:FZMaterial Width=\"8\" HorizontalAlignment=\"Left\" Margin=\"-30,0,0,0\" Color=\"{StaticResource A_Color_TileSelected_Background}\""
-             " Visibility=\"{Binding FH2Mod_Slot_" + std::to_string(kSlotSection) + "_Is_" + std::to_string(k) + ", Converter={StaticResource FH2Mod_ShowIf}}\" />\r\n"
+             " Visibility=\"{Binding FH2ML_Slot_" + std::to_string(kSlotSection) + "_Is_" + std::to_string(k) + ", Converter={StaticResource FH2ML_ShowIf}}\" />\r\n"
              "                                            <StackPanel VerticalAlignment=\"Center\">\r\n"
              "                                                <Grid>\r\n"
              "                                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width=\"Auto\" /></Grid.ColumnDefinitions>\r\n"
@@ -419,8 +419,8 @@ PageXaml page_xaml(const Facts* f, const std::map<std::string, std::string>& unl
         }
         const std::string stats = k == 0 ? "THE LAST " + std::to_string(kRecent) + " YOU UNLOCKED"
                                          : std::to_string(sGot) + " / " + std::to_string(cards[k].size()) + "    " + std::to_string(sScore) + " / " + gs(sScoreAll);
-        c += "                            <StackPanel Visibility=\"{Binding FH2Mod_Slot_" + std::to_string(kSlotSection) + "_Is_" + std::to_string(k) +
-             ", Converter={StaticResource FH2Mod_ShowIfHidden}}\">\r\n"
+        c += "                            <StackPanel Visibility=\"{Binding FH2ML_Slot_" + std::to_string(kSlotSection) + "_Is_" + std::to_string(k) +
+             ", Converter={StaticResource FH2ML_ShowIfHidden}}\">\r\n"
              "                                <local:FZMaterial Color=\"{StaticResource A_Color_DarkPanelHeader}\" Width=\"" + fmt("%.0f", kRightW) + "\" Height=\"" + fmt("%.0f", kHeaderH) + "\">\r\n"
              "                                    <Grid Margin=\"30,0,30,0\">\r\n"
              "                                        <local:FZTextBlock Text=\"" + esc(secs[k].title) + "\" Style=\"{StaticResource Ach_Text_Header}\" HorizontalAlignment=\"Left\" />\r\n"
@@ -442,16 +442,16 @@ PageXaml page_xaml(const Facts* f, const std::map<std::string, std::string>& unl
          "                </StackPanel>";
 
     // the help bar: on the sections, A goes into them; on the cards, B comes back
-    const std::string pane = "FH2Mod_Slot_" + std::to_string(kSlotPane);
+    const std::string pane = "FH2ML_Slot_" + std::to_string(kSlotPane);
     // LB and RB: the section before and after (achievements.cpp)
     const std::string bumpers = "                    local:ControllerButtonPanel.LBumperDescription=\"{local:Loc HelpButtons.IDS_Previous}\"\r\n"
                                 "                    local:ControllerButtonPanel.RBumperDescription=\"{local:Loc HelpButtons.IDS_Next}\"\r\n";
-    x.help = "<ContentControl x:Name=\"DefaultHelpPanel\" Visibility=\"{Binding " + pane + "_Is_0, Converter={StaticResource FH2Mod_ShowIf}}\"\r\n"
+    x.help = "<ContentControl x:Name=\"DefaultHelpPanel\" Visibility=\"{Binding " + pane + "_Is_0, Converter={StaticResource FH2ML_ShowIf}}\"\r\n"
              "                    local:ControllerButtonPanel.ADescription=\"{local:Loc HelpButtons.IDS_Select}\"\r\n"
              "                    local:ControllerButtonPanel.BDescription=\"{local:Loc HelpButtons.IDS_Back}\"\r\n" +
              bumpers +
              "                    Style=\"{StaticResource A_Style_ContentControl_DefaultButtonBar}\" />\r\n"
-             "<ContentControl x:Name=\"Ach_HelpCards\" Visibility=\"{Binding " + pane + "_Is_1, Converter={StaticResource FH2Mod_ShowIf}}\"\r\n"
+             "<ContentControl x:Name=\"Ach_HelpCards\" Visibility=\"{Binding " + pane + "_Is_1, Converter={StaticResource FH2ML_ShowIf}}\"\r\n"
              "                    local:ControllerButtonPanel.BDescription=\"{local:Loc HelpButtons.IDS_Back}\"\r\n" +
              bumpers +
              "                    Style=\"{StaticResource A_Style_ContentControl_DefaultButtonBar}\" />";
