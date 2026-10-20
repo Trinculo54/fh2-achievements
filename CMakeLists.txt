@@ -26,6 +26,13 @@ configure_file(cmake/version.h.in ${CMAKE_BINARY_DIR}/generated/fh2_version.h)
 # mods\achievements\mod.json, with the same version as the DLL
 configure_file(cmake/mod.json.in ${CMAKE_BINARY_DIR}/mod.json @ONLY)
 
+# SQLite (public domain, third_party/sqlite/VERSION.txt), to read the save and the game
+# database. Windows has its own (winsqlite3.dll), but Wine and Proton don't.
+set(SQLITE_SRC third_party/sqlite/sqlite3.c)
+set_source_files_properties(${SQLITE_SRC} PROPERTIES
+    COMPILE_OPTIONS "-w;-Os"
+    COMPILE_DEFINITIONS "SQLITE_OMIT_LOAD_EXTENSION;SQLITE_DEFAULT_MEMSTATUS=0")
+
 # The mod: mods\achievements\Achievements.dll, loaded by FH2ML through its v4 API
 # (third_party/fh2ml/FH2ML_v4.h, MIT: FH2ML provides every service, so there's nothing to link).
 add_library(achievements SHARED
@@ -34,8 +41,9 @@ add_library(achievements SHARED
     src/rules.cpp
     src/save_reader.cpp
     src/sqlite.cpp
-    src/version.rc)
-target_include_directories(achievements PRIVATE src third_party/fh2ml ${CMAKE_BINARY_DIR}/generated)
+    src/version.rc
+    ${SQLITE_SRC})
+target_include_directories(achievements PRIVATE src third_party/fh2ml third_party/sqlite ${CMAKE_BINARY_DIR}/generated)
 target_compile_definitions(achievements PRIVATE ACH_VERSION="${PROJECT_VERSION}")
 target_link_libraries(achievements PRIVATE bcrypt)
 set_target_properties(achievements PROPERTIES OUTPUT_NAME Achievements PREFIX "")
