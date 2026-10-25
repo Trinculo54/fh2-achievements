@@ -8,10 +8,12 @@
 //    exactly when a test save crossed 510,000, Blue.)
 //  - 168 mainland championships and 30 on Storm Island (Campaigns.CareerLocationId 0 and 1); six
 //    of the island ones are Gauntlets (race mode IronMan).
-//  - 175 mainland reward boards and 25 Storm Island bonus boards, 10 mainland barn finds and one
-//    on Storm Island (pdlc_barn_find_01), all listed in SaveState whether found or not. The 25
-//    mainland upgrade boards stay "Discovered" after smashing, so MiscStats/UpgradesBoardsSmashed
-//    supplies their smashed count.
+//  - 175 mainland reward boards (50 fast travel, 100 XP and 25 discount boards, the
+//    discount_board_upgrades_### ones) and 25 Storm Island bonus boards, 10 mainland barn finds
+//    and one on Storm Island (pdlc_barn_find_01), all listed in SaveState whether found or not.
+//    A smashed board's State is Collected. MiscStats/UpgradesBoardsSmashed can't stand in for
+//    the mainland discount boards: the game adds to it for every board of that kind collected
+//    (OnDiscountBoardCollected, 0x14050D050), and all 25 Storm Island boards are that kind.
 //  - Main/NumSkillTokens is the unspent Skill Point balance. Add the costs of purchased perk IDs
 //    (PlayerDatabase.PerkUnlock joined to Perks.Cost) to count total Skill Points earned.
 //  - Bucket lists 1-3 are the mainland's (15 challenges each: The Horizon, The Second Horizon and
@@ -38,6 +40,7 @@
 //    List_Upgrade*.Level); RaceStartParts sends those same three at each race start.
 //  - Showdowns are wager races, launched from a Car Meet into a network session (the car meet
 //    states' targets are WagerRace, OnlineFreeRoam, OnlineRoadTrip...), so they need online play.
+//    Rivals races ghosts from the leaderboards, also online; RivalsEnd has [7] car, [10] credits.
 #include "ach.hpp"
 
 #include <algorithm>
@@ -79,22 +82,11 @@ struct Boards {
 };
 Boards boards(const Facts& f, bool island) {
     Boards b;
-    int upgradesTotal = 0, upgradesHave = 0;
     for (const auto& [id, type] : f.save.objectType) {
         if (type != "DiscountBoardSaveState") continue;
         if ((id.rfind("island_", 0) == 0) != island) continue;
         ++b.total;
-        const bool smashed = f.prop(id, "State") == "Collected" || f.live.boardsSmashed.count(id);
-        if (!island && id.rfind("discount_board_upgrades_", 0) == 0) {
-            ++upgradesTotal;
-            if (smashed) ++upgradesHave;
-        } else if (smashed) {
-            ++b.have;
-        }
-    }
-    if (!island && upgradesTotal) {
-        const int fromStat = std::clamp(static_cast<int>(f.stat("MiscStats/UpgradesBoardsSmashed")), 0, upgradesTotal);
-        b.have += std::max(upgradesHave, fromStat);
+        if (f.prop(id, "State") == "Collected" || f.live.boardsSmashed.count(id)) ++b.have;
     }
     return b;
 }
@@ -108,18 +100,19 @@ int skill_points_earned(const Facts& f) {
     return total;
 }
 
+bool barn_restored(const Facts& f, const std::string& id) {
+    const std::string state = f.prop(id, "State");
+    return state == "Collected" || state == "Restored";
+}
+
+// The 10 mainland barn finds; Storm Island's is pdlc_barn_find_01.
 int barns_restored(const Facts& f) {
-    const auto restored = [&](const std::string& id) {
-        const std::string state = f.prop(id, "State");
-        return state == "Collected" || state == "Restored";
-    };
     int n = 0;
     for (int i = 1; i <= 10; ++i) {
         char id[32];
         std::snprintf(id, sizeof id, "barn_find_%02d", i);
-        if (restored(id)) ++n;
+        if (barn_restored(f, id)) ++n;
     }
-    if (restored("pdlc_barn_find_01")) ++n;
     return n;
 }
 
@@ -177,7 +170,7 @@ RULE(r_champion) { return Flag(f.flag("CareerState", "WonFirstFinal") || won_eve
 RULE(r_new_car) {
     // Bought a car since the mod was installed, or the garage holds more than the starting car
     // and all restored barn finds (every other way into the garage is a purchase).
-    const int restored = barns_restored(f);
+    const int restored = barns_restored(f) + barn_restored(f, "pdlc_barn_find_01");
     return Flag(f.ctr.get("bought") > 0 || static_cast<int>(f.save.garage.size()) > restored + 1);
 }
 RULE(r_cars50) { return P(std::max<double>(f.save.garage.size(), f.stat("CompareStats/CarsInGarage")), 50); }
@@ -192,7 +185,7 @@ RULE(r_boards_all) {
     return P(b.have, b.total ? b.total : 175);
 }
 RULE(r_roads) { return P(f.stat("CompareStats/RoadsDiscovered"), kMainlandRoads); }
-RULE(r_barns11) { return P(barns_restored(f), 11); }
+RULE(r_barns10) { return P(barns_restored(f), 10); }
 RULE(r_photos) {
     return P(std::max<double>(f.save.photos, f.stat("CompareStats/PhotoChallengesCompleted")), 100);
 }
@@ -278,10 +271,7 @@ RULE(r_island_coop_all) {
     auto b = bucket(f, {4, 5});
     return P(b.coop, b.total ? b.total : 8);
 }
-RULE(r_island_barn) {
-    const std::string state = f.prop("pdlc_barn_find_01", "State");
-    return Flag(state == "Collected" || state == "Restored");
-}
+RULE(r_island_barn) { return Flag(barn_restored(f, "pdlc_barn_find_01")); }
 RULE(r_island_chain) { return P(f.ctr.get("chain.island.best"), 100000); }
 RULE(r_fiesta) { return P(f.ctr.get("win.car.2158"), 1); }
 RULE(r_galant) { return P(f.ctr.get("win.car.1381"), 1); }
@@ -351,7 +341,7 @@ const std::vector<Def> kDefs = {
     {"summer_sale", "Summer Sale", "Smash 25 Reward Boards.", 10, G::Base, T::Save, "boards", r_boards25},
     {"smash_happy", "Smash Happy", "Collect all Reward Boards.", 20, G::Base, T::Save, "boards", r_boards_all},
     {"human_gps", "Human GPS", "Drive down every road in the game.", 10, G::Base, T::Save, "roads", r_roads},
-    {"storage_hunter", "Storage Hunter", "Restore all 11 Barn Finds.", 20, G::Base, T::Save, "barn finds", r_barns11},
+    {"storage_hunter", "Storage Hunter", "Restore 10 Barn Finds.", 20, G::Base, T::Save, "barn finds", r_barns10},
     {"photographer", "Photographer", "Take photos of 100 different cars for Horizon Promo.", 20, G::Base, T::Save, "cars", r_photos},
     {"one_down", "One Down!", "Complete a Solo Bucket List challenge from the first two Horizon Bucket Lists.", 10, G::Base, T::Save, "challenges", r_bucket1},
     {"kick_the_bucket", "Kick the Bucket", "Scratch 15 items off the first two Horizon Bucket Lists.", 10, G::Base, T::Save, "challenges", r_bucket15},
