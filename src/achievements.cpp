@@ -595,13 +595,20 @@ DWORD WINAPI worker(LPVOID) {
 
     GameData gd;
     std::string why;
-    if (read_game_data(g_gameDir, gd, why))
+    auto load_game_data = [&]() {
+        if (!read_game_data(g_gameDir, gd, why)) return false;
         logf("game data: %zu championship races in %zu car types, %d + %d championships, %zu Gauntlets, %zu bucket list "
              "challenges, %zu Porsches",
              gd.champEventBucket.size(), gd.mainlandBuckets.size(), gd.mainlandCampaigns, gd.islandCampaigns,
              gd.gauntletCampaigns.size(), gd.bucketList.size(), gd.porsches.size());
-    else
-        logf("%s", why.c_str());
+        return true;
+    };
+    // Without the game data, the weather, car type and Porsche events can't be counted, so the events
+    // wait (in the queue) while it's tried again every 30 seconds, for up to 10 minutes.
+    const ULONGLONG gdStart = GetTickCount64();
+    ULONGLONG gdTried = gdStart;
+    bool gdGaveUp = false;
+    if (!load_game_data()) logf("%s; trying again every 30 seconds", why.c_str());
 
     std::wstring userDir, user;
     while (!find_user_dir(g_azimuth, userDir, user, why)) {
@@ -611,7 +618,8 @@ DWORD WINAPI worker(LPVOID) {
         flush_log();
         Sleep(5000);
     }
-    const std::wstring storePath = g_dir + L"\\" + user + L".ini", listPath = g_dir + L"\\Achievements.txt";
+    std::wstring storePath = g_dir + L"\\" + user + L".ini";
+    const std::wstring listPath = g_dir + L"\\Achievements.txt";
     Store store;
     load_store(storePath, store);
     logf("profile %s: %zu achievements unlocked before%s", narrow(user).c_str(), store.unlocked.size(),
@@ -630,6 +638,33 @@ DWORD WINAPI worker(LPVOID) {
         // keep what we have and try it again in a few seconds (or, at the start, use the one before).
         if (now - lastScan > 5000) {
             lastScan = now;
+            // Another profile being saved to now (an install with two, such as one for online play):
+            // follow it, with its own unlock file, so its save and its progress aren't missed.
+            std::wstring nextDir, nextUser;
+            std::string whyNot;
+            if (find_user_dir(g_azimuth, nextDir, nextUser, whyNot) && nextUser != user) {
+                if (storeDirty && !save_store(storePath, store)) logf("couldn't write %s", narrow(storePath).c_str());
+                storeDirty = false;
+                logf("profile changed: %s -> %s", narrow(user).c_str(), narrow(nextUser).c_str());
+                user = nextUser;
+                userDir = nextDir;
+                storePath = g_dir + L"\\" + user + L".ini";
+                store = Store{};
+                load_store(storePath, store);
+                logf("profile %s: %zu achievements unlocked before%s", narrow(user).c_str(), store.unlocked.size(),
+                     store.existed ? "" : " (first run)");
+                save = SaveFacts{};
+                // stats and boards seen live may be the other profile's: its save says the rest
+                {
+                    std::lock_guard<std::mutex> lk(g_statMu);
+                    g_liveStats.clear();
+                }
+                live = LiveFacts{};
+                refused.clear();
+                firstEval = true;
+                dirty = false;
+                listDirty = pageDirty = true;
+            }
             for (const std::wstring& rev : list_revisions(userDir)) {
                 const std::string r = narrow(rev);
                 if (save.ok && r == save.revision) break;
@@ -656,9 +691,18 @@ DWORD WINAPI worker(LPVOID) {
                 if (save.ok) break;
             }
         }
-        // 2. events
+        // 2. events, once the game data is in (or it can't be had)
+        if (!gd.ok && !gdGaveUp && now - gdTried > 30000) {
+            gdTried = now;
+            if (load_game_data()) {
+                dirty = true;
+            } else if (now - gdStart > 600000) {
+                gdGaveUp = true;
+                logf("%s; giving up: weather, car type and Porsche events can't be counted this session", why.c_str());
+            }
+        }
         std::deque<Event> evs;
-        {
+        if (gd.ok || gdGaveUp) {
             std::lock_guard<std::mutex> lk(g_evMu);
             evs.swap(g_events);
         }

@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
 #include <sstream>
 
@@ -287,6 +288,9 @@ bool find_user_dir(const std::wstring& azimuthDir, std::wstring& userDir, std::w
     bool found = false;
     do {
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        // only the profiles themselves (User_ and the hex id), not copies such as "User_<id>.fresh-..."
+        const wchar_t* id = fd.cFileName + 5;
+        if (!*id || std::wcsspn(id, L"0123456789ABCDEFabcdef") != std::wcslen(id)) continue;
         WIN32_FILE_ATTRIBUTE_DATA a;
         const std::wstring rev = base + L"\\" + fd.cFileName + L"\\revisions";
         if (!GetFileAttributesExW(rev.c_str(), GetFileExInfoStandard, &a)) continue;
