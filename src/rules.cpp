@@ -70,6 +70,11 @@ Progress Flag(bool b) { return {b ? 1.0 : 0.0, 1}; }
 constexpr double kGreenXP = 210000, kPinkXP = 810000, kPurpleXP = 1410000, kGoldXP = 2910000;
 constexpr int kTrainInVain = 92, kHorizonFinale = 201, kIslandFinale = 937;
 constexpr int kMainlandRoads = 315, kIslandRoads = 50;
+// The totals the achievements ask for, as the stock game database has them. Fixed here rather than
+// counted from the database the mod reads, because other mods change that database: one that adds
+// a championship or a challenge would otherwise put "all of them" out of reach.
+constexpr int kMainlandChamps = 168, kIslandChamps = 30, kGauntlets = 6, kCarTypes = 28;
+constexpr int kIslandChallenges = 8, kPorscheChallenges = 10;
 
 bool won_event(const Facts& f, int event) {
     auto it = f.save.eventPlace.find(event);
@@ -165,7 +170,7 @@ RULE(r_number_one) {
 }
 RULE(r_champs25) { return P(f.save.champsCompleted.size(), 25); }
 RULE(r_champs100) { return P(f.save.champsCompleted.size(), 100); }
-RULE(r_champs_all) { return P(f.save.champsCompleted.size(), f.gd.mainlandCampaigns ? f.gd.mainlandCampaigns : 168); }
+RULE(r_champs_all) { return P(f.save.champsCompleted.size(), kMainlandChamps); }
 RULE(r_champion) { return Flag(f.flag("CareerState", "WonFirstFinal") || won_event(f, kHorizonFinale)); }
 RULE(r_new_car) {
     // Bought a car since the mod was installed, or the garage holds more than the starting car
@@ -220,7 +225,7 @@ RULE(r_wild_drivatar) {
 }
 
 RULE(r_car_types) {
-    return P(car_types_won(f), f.gd.mainlandBuckets.empty() ? 28 : f.gd.mainlandBuckets.size());
+    return P(car_types_won(f), kCarTypes);
 }
 // Online play: still counted from the profile's stats, in case online play comes back.
 RULE(r_rivals_credits) { return P(f.stat("CompareStats/CreditsEarnedFromRivals"), 1000000); }
@@ -239,7 +244,7 @@ RULE(r_pg100) {
 RULE(r_island_arrive) { return Flag(f.prop("islandiestate", "IEState") == "Complete" || f.flag("islandiestate", "HasAwardedInitialCar")); }
 RULE(r_island_won1) { return P(f.save.islandChampsWon.size(), 1); }
 RULE(r_island_won5) { return P(f.save.islandChampsWon.size(), 5); }
-RULE(r_island_all) { return P(f.save.islandChampsCompleted.size(), f.gd.islandCampaigns ? f.gd.islandCampaigns : 30); }
+RULE(r_island_all) { return P(f.save.islandChampsCompleted.size(), kIslandChamps); }
 // The game's own test for a Storm Island-ready car (before a Storm Island race it suggests the
 // Rally parts otherwise): Rally springs and dampers (level 4), Rally tyres (5), Rally
 // transmission (4). RaceStartParts sends those three levels at the start of each race.
@@ -253,7 +258,7 @@ RULE(r_gauntlet1) {
 RULE(r_gauntlet_all) {
     int n = 0;
     for (int c : f.gd.gauntletCampaigns) n += f.save.islandChampsWon.count(c);
-    return P(n, f.gd.gauntletCampaigns.empty() ? 6 : f.gd.gauntletCampaigns.size());
+    return P(n, kGauntlets);
 }
 RULE(r_island_roads) {
     return P(f.ctr.get("island.roads.all") ? kIslandRoads : f.stat("Island/RoadsDiscovered"), kIslandRoads);
@@ -263,14 +268,8 @@ RULE(r_island_boards) {
     return P(b.have, b.total ? b.total : 25);
 }
 RULE(r_island_bucket1) { return P(bucket(f, {4, 5}).solo, 1); }
-RULE(r_island_bucket_all) {
-    auto b = bucket(f, {4, 5});
-    return P(b.solo, b.total ? b.total : 8);
-}
-RULE(r_island_coop_all) {
-    auto b = bucket(f, {4, 5});
-    return P(b.coop, b.total ? b.total : 8);
-}
+RULE(r_island_bucket_all) { return P(bucket(f, {4, 5}).solo, kIslandChallenges); }
+RULE(r_island_coop_all) { return P(bucket(f, {4, 5}).coop, kIslandChallenges); }
 RULE(r_island_barn) { return Flag(barn_restored(f, "pdlc_barn_find_01")); }
 RULE(r_island_chain) { return P(f.ctr.get("chain.island.best"), 100000); }
 RULE(r_fiesta) { return P(f.ctr.get("win.car.2158"), 1); }
@@ -286,10 +285,7 @@ RULE(r_porsche_owned) {
     return Flag(false);
 }
 RULE(r_porsche_bucket5) { return P(bucket(f, {6}).solo, 5); }
-RULE(r_porsche_bucket_all) {
-    auto b = bucket(f, {6});
-    return P(b.solo, b.total ? b.total : 10);
-}
+RULE(r_porsche_bucket_all) { return P(bucket(f, {6}).solo, kPorscheChallenges); }
 RULE(r_porsche40) { return P(f.ctr.get("done.porsche"), 40); }
 RULE(r_914) { return P(f.ctr.get("done.car.266"), 4); }
 RULE(r_macan) { return P(f.ctr.get("done.car.2295"), 4); }
@@ -471,8 +467,9 @@ bool count_event(const Event& e, const GameData& gd, Counters& c, LiveFacts& liv
             c.add("rivals.cr.2297", e.i(10));
             return true;
         case ev::AnthemRaceEnd: {
-            // [8] car, [9] exit status (0 = finished), [10] time, [11] place (1 = won), [12] event,
-            // [14] championship.
+            // [8] car, [10] time, [11] place (1 = won), [12] event, [14] championship, [18]
+            // credits, [20] world. The game sends it from the race-end handler (0x1409CD9C0) and
+            // always passes 0 as [9]; the check below is only a guard.
             if (e.f.size() < 13 || e.i(9) != 0) return false;
             const int64_t car = e.i(8), place = e.i(11), event = e.i(12);
             const std::string cs = std::to_string(car);
