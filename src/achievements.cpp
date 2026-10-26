@@ -816,7 +816,7 @@ DWORD WINAPI worker(LPVOID) {
             heldRaces.clear();
         }
         for (const Event& e : evs) {
-            if (!gdReady && e.id == ev::AnthemRaceEnd) {
+            if (!gdReady && (e.id == ev::AnthemRaceEnd || e.id == ev::AnthemOnlineRaceEnd)) {
                 if (heldRaces.size() < 5000) heldRaces.push_back(e);
                 continue;
             }

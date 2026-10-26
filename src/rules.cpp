@@ -473,10 +473,21 @@ bool count_event(const Event& e, const GameData& gd, Counters& c, LiveFacts& liv
             if (e.i(4) <= 0) return false;
             c.add("club.xp", e.i(4));
             return true;
-        case ev::AnthemOnlineRaceEnd:     // an online event finished; the last field is the world
-            if (e.world() != kWorldIsland) return false;
-            c.add("online.island.done", 1);
-            return true;
+        case ev::AnthemOnlineRaceEnd: {   // an online event finished: [8] car (as in AnthemRaceEnd), last the world
+            bool counted = false;
+            if (e.world() == kWorldIsland) {
+                c.add("online.island.done", 1);
+                counted = true;
+            }
+            // Online races count for the Porsche ones too, as they did on Xbox.
+            const int64_t car = e.i(8);
+            if (gd.porsches.count(static_cast<int>(car))) {
+                c.add("done.car." + std::to_string(car), 1);
+                c.add("done.porsche", 1);
+                counted = true;
+            }
+            return counted;
+        }
         case ev::AnthemRaceEnd: {
             // [8] car, [10] time, [11] place (1 = won), [12] event, [14] championship, [18]
             // credits, [20] world. The game sends it from the race-end handler (0x1409CD9C0) and
