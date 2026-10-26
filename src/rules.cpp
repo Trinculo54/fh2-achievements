@@ -237,10 +237,12 @@ RULE(r_island_all) { return P(f.save.islandChampsCompleted.size(), kIslandChamps
 // transmission (4). RaceStartParts sends those three levels at the start of each race.
 RULE(r_ready_to_bounce) { return Flag(f.ctr.get("island.rally.start") > 0); }
 RULE(r_island_champion) { return Flag(f.flag("CareerState", "WonFirstIslandFinal") || won_event(f, kIslandFinale)); }
+// The save only lists a Gauntlet as completed when it was won, so a finish in any place comes from
+// the profile's Island/IronManEventsEntered, which the game raises at each Gauntlet's end.
 RULE(r_gauntlet1) {
     int n = 0;
     for (int c : f.gd.gauntletCampaigns) n += f.save.islandChampsCompleted.count(c);
-    return P(n, 1);
+    return P(std::max<double>(n, f.stat("Island/IronManEventsEntered")), 1);
 }
 RULE(r_gauntlet_all) {
     int n = 0;
