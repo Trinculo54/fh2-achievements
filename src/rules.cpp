@@ -8,14 +8,16 @@
 //    exactly when a test save crossed 510,000, Blue.)
 //  - 168 mainland championships and 30 on Storm Island (Campaigns.CareerLocationId 0 and 1); six
 //    of the island ones are Gauntlets (race mode IronMan).
-//  - 175 mainland reward boards (50 fast travel, 100 XP and 25 discount boards, the
-//    discount_board_upgrades_### ones) and 25 Storm Island bonus boards, 10 mainland barn finds
-//    and one on Storm Island (pdlc_barn_find_01), all listed in SaveState whether found or not.
-//    A smashed board's State is Collected. MiscStats/UpgradesBoardsSmashed can't stand in for
-//    the mainland discount boards: the game adds to it for every board of that kind collected
-//    (OnDiscountBoardCollected, 0x14050D050), and all 25 Storm Island boards are that kind.
-//  - Main/NumSkillTokens is the unspent Skill Point balance. Add the costs of purchased perk IDs
-//    (PlayerDatabase.PerkUnlock joined to Perks.Cost) to count total Skill Points earned.
+//  - 150 mainland reward boards (tracks\anthem\ribbon_00\GameObjs.xml: 50 fast travel and 100 XP,
+//    saved as discount_board_travel_### and discount_board_xp_a/b/c_###) and 25 Storm Island
+//    bonus boards (the DLC's test03 GameObjs.xml: 25 upgrade discount boards, saved as
+//    island_discount_board_upgrades_###). A smashed board's State is Collected (OnSmashed,
+//    0x14050F910). Once Storm Island's races have run, the save also lists 25
+//    discount_board_upgrades_### without the island_ prefix: copies of the island's boards that
+//    those routes keep hidden, which never become Collected, so they aren't counted. 10 mainland
+//    barn finds and one on Storm Island (pdlc_barn_find_01).
+//  - Main/NumSkillTokens is the total Skill Points earned. Buying a perk doesn't lower it; the
+//    balance left to spend is SaveState skills.CurrentSkillTokensTotal. The 25 perks cost 65.
 //  - Bucket lists 1-3 are the mainland's (15 challenges each: The Horizon, The Second Horizon and
 //    Beat Playground Games), 4-5 Storm Island's (8), 6 the Porsche one (10). The mainland bucket
 //    list achievements count the first two only.
@@ -74,35 +76,24 @@ constexpr int kMainlandRoads = 315, kIslandRoads = 50;
 // counted from the database the mod reads, because other mods change that database: one that adds
 // a championship or a challenge would otherwise put "all of them" out of reach.
 constexpr int kMainlandChamps = 168, kIslandChamps = 30, kGauntlets = 6, kCarTypes = 28;
-constexpr int kIslandChallenges = 8, kPorscheChallenges = 10;
+constexpr int kIslandChallenges = 8, kPorscheChallenges = 10, kMainlandBoards = 150, kIslandBoards = 25;
 
 bool won_event(const Facts& f, int event) {
     auto it = f.save.eventPlace.find(event);
     return (it != f.save.eventPlace.end() && it->second == 1) || f.ctr.get("won." + std::to_string(event)) > 0;
 }
 
-// Reward boards: SaveState's DiscountBoardSaveState objects, plus any smashed this session.
-struct Boards {
-    int have = 0, total = 0;
-};
-Boards boards(const Facts& f, bool island) {
-    Boards b;
+// Reward boards smashed: SaveState's DiscountBoardSaveState objects, plus any smashed this session.
+// The mainland's are the fast travel and XP boards; the island's have the island_ prefix.
+int boards(const Facts& f, bool island) {
+    int n = 0;
     for (const auto& [id, type] : f.save.objectType) {
         if (type != "DiscountBoardSaveState") continue;
-        if ((id.rfind("island_", 0) == 0) != island) continue;
-        ++b.total;
-        if (f.prop(id, "State") == "Collected" || f.live.boardsSmashed.count(id)) ++b.have;
+        const bool counts = island ? id.rfind("island_", 0) == 0
+                                   : id.rfind("discount_board_travel_", 0) == 0 || id.rfind("discount_board_xp_", 0) == 0;
+        if (counts && (f.prop(id, "State") == "Collected" || f.live.boardsSmashed.count(id))) ++n;
     }
-    return b;
-}
-
-int skill_points_earned(const Facts& f) {
-    int total = static_cast<int>(f.stat("Main/NumSkillTokens"));
-    for (int id : f.save.perkUnlocks) {
-        const auto cost = f.gd.perkCosts.find(id);
-        if (cost != f.gd.perkCosts.end()) total += cost->second;
-    }
-    return total;
+    return n;
 }
 
 bool barn_restored(const Facts& f, const std::string& id) {
@@ -180,15 +171,11 @@ RULE(r_new_car) {
 }
 RULE(r_cars50) { return P(std::max<double>(f.save.garage.size(), f.stat("CompareStats/CarsInGarage")), 50); }
 RULE(r_cars175) { return P(std::max<double>(f.save.garage.size(), f.stat("CompareStats/CarsInGarage")), 175); }
-RULE(r_skill5) { return P(skill_points_earned(f), 5); }
-// The Xbox achievement is capped at 65, even when the save's earned-point total is higher.
-RULE(r_skill65) { return {static_cast<double>(std::clamp(skill_points_earned(f), 0, 65)), 65}; }
+RULE(r_skill5) { return P(f.stat("Main/NumSkillTokens"), 5); }
+RULE(r_skill65) { return P(f.stat("Main/NumSkillTokens"), 65); }
 RULE(r_clean100) { return P(f.ctr.get("skill.FastAndClean"), 100); }
-RULE(r_boards25) { return P(boards(f, false).have, 25); }
-RULE(r_boards_all) {
-    auto b = boards(f, false);
-    return P(b.have, b.total ? b.total : 175);
-}
+RULE(r_boards25) { return P(boards(f, false), 25); }
+RULE(r_boards_all) { return P(boards(f, false), kMainlandBoards); }
 RULE(r_roads) { return P(f.stat("CompareStats/RoadsDiscovered"), kMainlandRoads); }
 RULE(r_barns10) { return P(barns_restored(f), 10); }
 RULE(r_photos) {
@@ -264,8 +251,7 @@ RULE(r_island_roads) {
     return P(f.ctr.get("island.roads.all") ? kIslandRoads : f.stat("Island/RoadsDiscovered"), kIslandRoads);
 }
 RULE(r_island_boards) {
-    auto b = boards(f, true);
-    return P(b.have, b.total ? b.total : 25);
+    return P(boards(f, true), kIslandBoards);
 }
 RULE(r_island_bucket1) { return P(bucket(f, {4, 5}).solo, 1); }
 RULE(r_island_bucket_all) { return P(bucket(f, {4, 5}).solo, kIslandChallenges); }
