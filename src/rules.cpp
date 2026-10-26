@@ -43,6 +43,11 @@
 //  - Showdowns are wager races, launched from a Car Meet into a network session (the car meet
 //    states' targets are WagerRace, OnlineFreeRoam, OnlineRoadTrip...), so they need online play.
 //    Rivals races ghosts from the leaderboards, also online; RivalsEnd has [7] car, [10] credits.
+//  - Online play (it works again through FH2MP's servers), from each event's debug text in the game:
+//    RivalsEverywhereEnd (0x1409D0470) has [3] the type ("SpeedTrap"...), [4] beatRival, [5] the
+//    score; offline there's no rival ([4] 0, score -1). ClubXPWon has [3] the club and [4] the XP; it
+//    is posted from the event rewards (0x140614C10) whenever an event pays XP while you're in a club.
+//    AnthemOnlineRaceEnd's last field is the world, like the other events.
 #include "ach.hpp"
 
 #include <algorithm>
@@ -223,6 +228,12 @@ RULE(r_team50) { return P(f.stat("MiscStats/OnlineTeamRacesWon"), 50); }
 RULE(r_online_trip1) { return P(f.stat("CompareStats/OnlineRoadTripDestsCompleted"), 1); }
 RULE(r_online_trip25) { return P(f.stat("CompareStats/OnlineRoadTripDestsCompleted"), 25); }
 RULE(r_coop25) { return P(bucket(f, {1, 2}).coop, 25); }
+// Speed traps where the rival on the board was beaten (RivalsEverywhereEnd's beatRival). Offline the
+// game has no rival there, so these only come from online play.
+RULE(r_bragging_rights) { return P(static_cast<double>(f.ctr.get("speedtrap.beat")), 20); }
+// Club XP: the game's ClubXPWon, sent whenever an event pays XP while you're in a club.
+RULE(r_loyal) { return P(static_cast<double>(f.ctr.get("club.xp")), 500000); }
+RULE(r_island_online50) { return P(static_cast<double>(f.ctr.get("online.island.done")), 50); }
 RULE(r_pg100) {
     return P(f.stat("MiscStats/OnlineInfectedGamesEntered") + f.stat("MiscStats/OnlineKingGamesEntered"), 100);
 }
@@ -337,11 +348,11 @@ const std::vector<Def> kDefs = {
     {"we_meet_again", "We Meet Again!", "Win a Showdown at every Car Meet.", 20, G::Base, T::Online, nullptr, nullptr},
     {"friends_with_benefits", "Friends with Benefits", "Earn a total of 1,000,000 Cr from Rivals.", 10, G::Base, T::Online, "Cr", r_rivals_credits},
     {"super_meet_boy", "Super Meet Boy", "Grab a livery, grab a tuning setup, buy a car, and enter a Showdown at any Car Meet.", 10, G::Base, T::Online, nullptr, nullptr},
-    {"bragging_rights", "Bragging Rights", "Beat Friends or Club members on any 20 Speed Cameras.", 10, G::Base, T::Online, nullptr, nullptr},
+    {"bragging_rights", "Bragging Rights", "Beat Friends or Club members on any 20 Speed Cameras.", 10, G::Base, T::Online, "speed cameras", r_bragging_rights},
     {"social_caterpillar", "Social Caterpillar", "Compete in 20 Multiplayer Events.", 10, G::Base, T::Online, "events", r_mp20},
     {"social_butterfly", "Social Butterfly", "Compete in 200 Multiplayer Events.", 50, G::Base, T::Online, "events", r_mp200},
     {"team_player", "Team Player", "Win 50 Team Events.", 30, G::Base, T::Online, "wins", r_team50},
-    {"loyal", "Loyal", "Earn 500,000 XP for your Club.", 25, G::Base, T::Online, nullptr, nullptr},
+    {"loyal", "Loyal", "Earn 500,000 XP for your Club.", 25, G::Base, T::Online, "XP", r_loyal},
     {"on_the_road_again", "On the Road Again", "Complete an Online Road Trip location.", 10, G::Base, T::Online, "locations", r_online_trip1},
     {"well_travelled", "Well Travelled", "Complete 25 Online Road Trip locations.", 30, G::Base, T::Online, "locations", r_online_trip25},
     {"yes_we_can", "Yes We Can", "Complete 25 Bucket List items co-operatively from the first two Horizon Bucket Lists.", 30, G::Base, T::Online, "challenges", r_coop25},
@@ -370,7 +381,7 @@ const std::vector<Def> kDefs = {
     {"ranger_rock_star", "Ranger Rock Star", "Win an event in the Ford Ranger.", 10, G::StormIsland, T::Events, nullptr, r_ranger},
     {"stadium_star", "Stadium Star", "Win an Event in the Robby Gordon #7 SST.", 10, G::StormIsland, T::Events, nullptr, r_sst},
     {"meet_and_beat", "Meet and Beat", "Visit the Storm Island Car Meet and win 3 Showdowns.", 20, G::StormIsland, T::Online, nullptr, nullptr},
-    {"horizon_5_0", "Horizon 5-0", "Complete 50 Online Events on Storm Island.", 30, G::StormIsland, T::Online, nullptr, nullptr},
+    {"horizon_5_0", "Horizon 5-0", "Complete 50 Online Events on Storm Island.", 30, G::StormIsland, T::Online, "events", r_island_online50},
 
     // ---- Porsche Expansion: 15, 500G ----
     {"porsche_owners_club", "Porsche Owners Club", "Obtain your first Porsche.", 25, G::Porsche, T::Save, nullptr, r_porsche_owned},
@@ -450,9 +461,21 @@ bool count_event(const Event& e, const GameData& gd, Counters& c, LiveFacts& liv
         case ev::RoadTripCreated:         // a destination picked on the Road Trip screen
             c.raise("roadtrip.chosen", 1);
             return true;
-        case ev::RivalsEnd:               // [3] event, [4] track, [7] car, [10] credits won, [11] place
+        case ev::RivalsEnd:               // [3] event, [4] track, [7] car, [10] credits won, [12] rival XUID
             if (e.i(7) != 2297 || e.i(10) <= 0) return false;
             c.add("rivals.cr.2297", e.i(10));
+            return true;
+        case ev::RivalsEverywhereEnd:     // [3] type ("SpeedTrap"...), [4] beatRival, [5] score
+            if (e.s(3) != "SpeedTrap" || !e.i(4)) return false;
+            c.add("speedtrap.beat", 1);
+            return true;
+        case ev::ClubXPWon:               // [3] club, [4] XP gained
+            if (e.i(4) <= 0) return false;
+            c.add("club.xp", e.i(4));
+            return true;
+        case ev::AnthemOnlineRaceEnd:     // an online event finished; the last field is the world
+            if (e.world() != kWorldIsland) return false;
+            c.add("online.island.done", 1);
             return true;
         case ev::AnthemRaceEnd: {
             // [8] car, [10] time, [11] place (1 = won), [12] event, [14] championship, [18]

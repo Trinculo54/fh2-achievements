@@ -174,6 +174,9 @@ bool wanted(uint16_t id) {
         case ev::RaceStartParts:
         case ev::RivalsEnd:
         case ev::RoadTripCreated:
+        case ev::AnthemOnlineRaceEnd:
+        case ev::ClubXPWon:
+        case ev::RivalsEverywhereEnd:
             return true;
         default:
             return false;

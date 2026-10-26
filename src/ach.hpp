@@ -143,10 +143,11 @@ struct Event {
 
 // Event ids (the ETX descriptor's low 16 bits) this mod uses.
 namespace ev {
-constexpr uint16_t AnthemRaceEnd = 6, CarPurchased = 19, DistanceDrivenDelta = 33, IslandRewardBoardSmashed = 54,
-                   IslandRoadsDriven = 55, IslandSkillChainCompleted = 57, RaceEncounterEnd = 97, RaceStartParts = 101,
-                   RewardBoardSmashed = 103, RivalsEnd = 104, RoadTripCreated = 109, SkillAchieved = 115,
-                   SkillChainCompleted = 116, WristbandGained = 129, XPGained = 131;
+constexpr uint16_t AnthemOnlineRaceEnd = 4, AnthemRaceEnd = 6, CarPurchased = 19, ClubXPWon = 27, DistanceDrivenDelta = 33,
+                   IslandRewardBoardSmashed = 54, IslandRoadsDriven = 55, IslandSkillChainCompleted = 57, RaceEncounterEnd = 97,
+                   RaceStartParts = 101, RewardBoardSmashed = 103, RivalsEnd = 104, RivalsEverywhereEnd = 105,
+                   RoadTripCreated = 109, SkillAchieved = 115, SkillChainCompleted = 116, WristbandGained = 129,
+                   XPGained = 131;
 }
 constexpr int64_t kWorldIsland = 549;
 
