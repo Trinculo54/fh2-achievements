@@ -55,6 +55,7 @@ struct SaveFacts {
     std::vector<int> garage;                               // car id per garage slot
     int photos = 0;                                        // Horizon Promo cars photographed
     std::map<int, std::pair<bool, bool>> bucket;           // challenge -> (solo done, co-op done)
+    std::string dbNotes;                                   // PlayerDatabase tables that couldn't be read
 };
 
 // From this session's hooks.
@@ -159,7 +160,10 @@ bool take_baselines(const SaveFacts& save, Counters& c);
 
 // The profile's save folder: <azimuth>\data\titles\1A96545B\saves\player-1\User_<id>, the one
 // written to most recently if there are several.
-bool find_user_dir(const std::wstring& azimuthDir, std::wstring& userDir, std::wstring& user, std::string& why);
+// Optionally: how many profiles there are, and when the chosen one's revisions were last written
+// (a FILETIME as 64 bits).
+bool find_user_dir(const std::wstring& azimuthDir, std::wstring& userDir, std::wstring& user, std::string& why,
+                   int* profiles = nullptr, uint64_t* written = nullptr);
 // Its revision folder names, newest first.
 std::vector<std::wstring> list_revisions(const std::wstring& userDir);
 // Reads one revision. Its files are checked against its commit manifest first, so a revision

@@ -315,8 +315,12 @@ void on_set_stat(FH2Context* c, void*) {
 std::mutex g_compMu;
 std::vector<uint8_t*> g_comps;   // live HUDMinorNotificationComponents, oldest first
 std::atomic<ULONGLONG> g_firstCompTick{0};
+// The constructor, destructor and tick hooks all made and on: without the destructor the list
+// would keep components the game has freed, so pop-ups need all three.
+std::atomic<bool> g_popupHooks{false};
 
 void on_notif_ctor(FH2Context* c, void*) {
+    if (!g_popupHooks) return;
     std::lock_guard<std::mutex> lk(g_compMu);
     g_comps.push_back(reinterpret_cast<uint8_t*>(c->rbx));
     if (!g_firstCompTick) g_firstCompTick = GetTickCount64();
@@ -352,7 +356,7 @@ void queue_popup(const std::string& main, const std::string& sub) {
 
 // Runs on the game thread about 60 times a second.
 void on_tick(FH2Context*, void*) {
-    if (!g_popupsOn || !g_ready) return;
+    if (!g_popupsOn || !g_ready || !g_popupHooks) return;
     const ULONGLONG now = GetTickCount64();
     if (now < g_nextPopup) return;
     Popup p;
@@ -391,11 +395,37 @@ struct Store {
     std::map<std::string, std::string> unlocked;   // id -> when
     Counters ctr;
     bool existed = false;
+    bool writable = true;    // false: the file is there but couldn't be read, so it's never overwritten
+    bool backedUp = false;   // copied to <user>.ini.bak before this session's first write
 };
 
-void load_store(const std::wstring& path, Store& s) {
-    std::ifstream in(path.c_str());
-    s.existed = in.good();
+bool read_text(const std::wstring& path, std::string& out) {
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    bool ok = GetFileSizeEx(h, &size) && size.QuadPart < (16 << 20);
+    if (ok) {
+        out.resize(static_cast<size_t>(size.QuadPart));
+        DWORD got = 0;
+        ok = out.empty() || (ReadFile(h, out.data(), static_cast<DWORD>(out.size()), &got, nullptr) && got == out.size());
+    }
+    CloseHandle(h);
+    return ok;
+}
+
+enum class StoreRead { Ok, Missing, Unreadable, Damaged };
+
+StoreRead read_store(const std::wstring& path, Store& s) {
+    s = Store{};
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return StoreRead::Missing;
+    s.existed = true;
+    std::string text;
+    bool got = false;   // another program (a virus scanner, a backup) may have it open for a moment
+    for (int i = 0; i < 10 && !(got = read_text(path, text)); ++i) Sleep(300);
+    if (!got) return StoreRead::Unreadable;
+    if (text.find("[unlocked]") == std::string::npos) return StoreRead::Damaged;   // emptied by a crash, say
+    std::istringstream in(text);
     std::string line, section;
     while (std::getline(in, line)) {
         while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
@@ -410,9 +440,40 @@ void load_store(const std::wstring& path, Store& s) {
         if (section == "[unlocked]") s.unlocked[k] = v;
         else if (section == "[counters]") s.ctr.v[k] = std::strtoll(v.c_str(), nullptr, 10);
     }
+    return StoreRead::Ok;
 }
 
-bool save_store(const std::wstring& path, const Store& s) {
+// The profile's unlock file. One that's there but can't be read is left alone for the session; a
+// damaged one is kept as .damaged and replaced by the backup from the start of the last session.
+void load_store(const std::wstring& path, Store& s) {
+    const StoreRead r = read_store(path, s);
+    if (r == StoreRead::Ok || r == StoreRead::Missing) return;
+    if (r == StoreRead::Unreadable) {
+        s = Store{};
+        s.existed = true;
+        s.writable = false;
+        logf("couldn't open %s: it's left as it is, and this session's achievements aren't saved; restart the game "
+             "to try again",
+             narrow(path).c_str());
+        return;
+    }
+    CopyFileW(path.c_str(), (path + L".damaged").c_str(), FALSE);
+    Store bak;
+    if (read_store(path + L".bak", bak) == StoreRead::Ok) {
+        s = std::move(bak);
+        s.backedUp = true;   // keep the good backup
+        logf("%s was damaged (kept as .damaged): using the backup from the start of the last session",
+             narrow(path).c_str());
+    } else {
+        s = Store{};
+        s.existed = true;
+        logf("%s was damaged (kept as .damaged) and there's no backup: starting it again from the save",
+             narrow(path).c_str());
+    }
+}
+
+bool save_store(const std::wstring& path, Store& s) {
+    if (!s.writable) return true;
     std::ostringstream o;
     o << "; Achievements unlocked offline (Achievements mod). Delete this file to start over.\n[unlocked]\n";
     for (const auto& [k, v] : s.unlocked) o << k << '=' << v << '\n';
@@ -423,9 +484,15 @@ bool save_store(const std::wstring& path, const Store& s) {
     HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
     DWORD w = 0;
-    const bool ok = WriteFile(h, text.data(), static_cast<DWORD>(text.size()), &w, nullptr) && w == text.size();
+    const bool ok = WriteFile(h, text.data(), static_cast<DWORD>(text.size()), &w, nullptr) && w == text.size() &&
+                    FlushFileBuffers(h);
     CloseHandle(h);
-    return ok && MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    if (!ok) return false;
+    if (!s.backedUp) {   // the file as the session found it, in case a crash damages the new one
+        if (s.existed) CopyFileW(path.c_str(), (path + L".bak").c_str(), FALSE);
+        s.backedUp = true;
+    }
+    return MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }
 
 // ---- the in-game page (platform API 8) ------------------------------------------------------
@@ -586,10 +653,21 @@ DWORD WINAPI worker(LPVOID) {
     else
         logf("couldn't hook the telemetry import (see platform.log): no event-based achievements");
     made += hook("SetStat (after its enabled check)", rva::SetStatHook, &on_set_stat) != nullptr;
-    made += hook("HUDMinorNotificationComponent constructor", rva::NotifCtor, &on_notif_ctor) != nullptr;
-    made += hook("HUDMinorNotificationComponent destructor", rva::NotifDtor, &on_notif_dtor) != nullptr;
-    made += hook("AchievementsModule update (pop-up tick)", rva::AchModUpdate, &on_tick) != nullptr;
-    g_api->enable_hooks(g_mod, nullptr);
+    FH2Hook* ctor = hook("HUDMinorNotificationComponent constructor", rva::NotifCtor, &on_notif_ctor);
+    FH2Hook* dtor = hook("HUDMinorNotificationComponent destructor", rva::NotifDtor, &on_notif_dtor);
+    FH2Hook* tick = hook("AchievementsModule update (pop-up tick)", rva::AchModUpdate, &on_tick);
+    made += (ctor != nullptr) + (dtor != nullptr) + (tick != nullptr);
+    g_popupHooks = ctor && dtor && tick;
+    if (!g_api->enable_hooks(g_mod, nullptr)) {
+        // which one is in platform.log; the pop-ups need all three, so check them one by one
+        g_popupHooks = g_popupHooks && g_api->enable_hooks(g_mod, ctor) && g_api->enable_hooks(g_mod, dtor) &&
+                       g_api->enable_hooks(g_mod, tick);
+    }
+    if (!g_popupHooks) {
+        for (FH2Hook* h : {ctor, dtor, tick})
+            if (h) g_api->disable_hooks(g_mod, h);
+        logf("the HUD notification hooks aren't all in: no pop-ups (achievements still unlock)");
+    }
     logf("%d of 5 hooks made", made);
     plog(std::to_string(made) + " of 5 hooks made; logging to fh2-mods\\Achievements\\Achievements.log");
 
@@ -603,21 +681,32 @@ DWORD WINAPI worker(LPVOID) {
              gd.gauntletCampaigns.size(), gd.bucketList.size(), gd.porsches.size());
         return true;
     };
-    // Without the game data, the weather, car type and Porsche events can't be counted, so the events
-    // wait (in the queue) while it's tried again every 30 seconds, for up to 10 minutes.
+    // Without the game data, race ends can't be counted (their weather, car type and Porsches come
+    // from it), so they wait while it's tried again every 30 seconds, for up to 10 minutes.
     const ULONGLONG gdStart = GetTickCount64();
     ULONGLONG gdTried = gdStart;
     bool gdGaveUp = false;
+    std::deque<Event> heldRaces;
     if (!load_game_data()) logf("%s; trying again every 30 seconds", why.c_str());
 
+    FILETIME startFt;
+    GetSystemTimeAsFileTime(&startFt);
+    const uint64_t started = (static_cast<uint64_t>(startFt.dwHighDateTime) << 32) | startFt.dwLowDateTime;
     std::wstring userDir, user;
-    while (!find_user_dir(g_azimuth, userDir, user, why)) {
+    int profiles = 0;
+    uint64_t written = 0;
+    while (!find_user_dir(g_azimuth, userDir, user, why, &profiles, &written)) {
         static bool told = false;
         if (!told) logf("%s; waiting for one", why.c_str());
         told = true;
         flush_log();
         Sleep(5000);
     }
+    // With more than one profile, the one being played is only certain once the game saves to it:
+    // until then the events wait in their queue and nothing is worked out, so no progress goes to the
+    // wrong profile.
+    bool sure = profiles <= 1 || written > started;
+    if (!sure) logf("%d profiles: waiting for the game to save, to know which one is played", profiles);
     std::wstring storePath = g_dir + L"\\" + user + L".ini";
     const std::wstring listPath = g_dir + L"\\Achievements.txt";
     Store store;
@@ -627,10 +716,11 @@ DWORD WINAPI worker(LPVOID) {
 
     SaveFacts save;
     LiveFacts live;
-    bool firstEval = true, storeDirty = false, dirty = false, listDirty = false, pageDirty = true;
+    bool firstEval = true, storeDirty = false, storeUrgent = false, dirty = false, listDirty = false, pageDirty = true;
     uint32_t statVersion = ~0u;
     ULONGLONG lastScan = 0, lastFlush = 0, lastStoreWrite = 0, lastList = 0, lastPage = 0;
     std::map<std::string, ULONGLONG> refused;   // revision -> when it was last refused
+    std::string notedDb;                        // the PlayerDatabase note last logged
 
     for (;;) {
         const ULONGLONG now = GetTickCount64();
@@ -642,7 +732,8 @@ DWORD WINAPI worker(LPVOID) {
             // follow it, with its own unlock file, so its save and its progress aren't missed.
             std::wstring nextDir, nextUser;
             std::string whyNot;
-            if (find_user_dir(g_azimuth, nextDir, nextUser, whyNot) && nextUser != user) {
+            const bool foundUser = find_user_dir(g_azimuth, nextDir, nextUser, whyNot, &profiles, &written);
+            if (foundUser && nextUser != user) {
                 if (storeDirty && !save_store(storePath, store)) logf("couldn't write %s", narrow(storePath).c_str());
                 storeDirty = false;
                 logf("profile changed: %s -> %s", narrow(user).c_str(), narrow(nextUser).c_str());
@@ -665,6 +756,11 @@ DWORD WINAPI worker(LPVOID) {
                 dirty = false;
                 listDirty = pageDirty = true;
             }
+            if (!sure && foundUser && written > started) {
+                sure = true;
+                dirty = true;
+                logf("the game saved to %s: that's the profile being played", narrow(user).c_str());
+            }
             for (const std::wstring& rev : list_revisions(userDir)) {
                 const std::string r = narrow(rev);
                 if (save.ok && r == save.revision) break;
@@ -684,6 +780,10 @@ DWORD WINAPI worker(LPVOID) {
                     }
                     logf("read save revision %s: %zu stats, %zu objects, %zu cars, %zu championships done", r.c_str(),
                          save.stats.size(), save.objects.size(), save.garage.size(), save.champsCompleted.size());
+                    if (save.dbNotes != notedDb) {
+                        notedDb = save.dbNotes;
+                        if (!notedDb.empty()) logf("save tables not read (counted as empty): %s", notedDb.c_str());
+                    }
                     break;
                 }
                 if (it == refused.end()) logf("save revision %s not used yet: %s", r.c_str(), why.c_str());
@@ -691,25 +791,40 @@ DWORD WINAPI worker(LPVOID) {
                 if (save.ok) break;
             }
         }
-        // 2. events, once the game data is in (or it can't be had)
+        // 2. events, once the profile is certain; race ends once the game data is in (or can't be had)
         if (!gd.ok && !gdGaveUp && now - gdTried > 30000) {
             gdTried = now;
             if (load_game_data()) {
                 dirty = true;
             } else if (now - gdStart > 600000) {
                 gdGaveUp = true;
-                logf("%s; giving up: weather, car type and Porsche events can't be counted this session", why.c_str());
+                logf("%s; giving up: race ends are counted without weather, car types or Porsches this session",
+                     why.c_str());
             }
         }
         std::deque<Event> evs;
-        if (gd.ok || gdGaveUp) {
+        if (sure) {
             std::lock_guard<std::mutex> lk(g_evMu);
             evs.swap(g_events);
         }
-        for (const Event& e : evs)
+        const bool gdReady = gd.ok || gdGaveUp;
+        if (gdReady && !heldRaces.empty()) {
+            evs.insert(evs.begin(), heldRaces.begin(), heldRaces.end());
+            heldRaces.clear();
+        }
+        for (const Event& e : evs) {
+            if (!gdReady && e.id == ev::AnthemRaceEnd) {
+                if (heldRaces.size() < 5000) heldRaces.push_back(e);
+                continue;
+            }
             if (count_event(e, gd, store.ctr, live)) {
                 dirty = storeDirty = true;
+                // the frequent ones can wait for the next write; anything else is written at once,
+                // as the game is ended without warning
+                if (e.id != ev::SkillAchieved && e.id != ev::SkillChainCompleted && e.id != ev::IslandSkillChainCompleted)
+                    storeUrgent = true;
             }
+        }
         // 3. live stats
         if (g_statVersion != statVersion) {
             statVersion = g_statVersion;
@@ -718,7 +833,7 @@ DWORD WINAPI worker(LPVOID) {
             dirty = true;
         }
         // 4. the rules
-        if (dirty && save.ok) {
+        if (dirty && save.ok && sure) {
             dirty = false;
             Facts f{gd, save, live, store.ctr};
             std::vector<const Def*> fresh;
@@ -732,7 +847,7 @@ DWORD WINAPI worker(LPVOID) {
                 logf("unlocked: %s (%dG)", d.name, d.gamerscore);
             }
             if (!fresh.empty()) {
-                storeDirty = true;
+                storeDirty = storeUrgent = true;
                 char sub[128];
                 if (firstEval && (!store.existed || fresh.size() >= 3)) {
                     std::snprintf(sub, sizeof sub, "%zu unlocked from your save - %dG", fresh.size(), gs);
@@ -771,9 +886,10 @@ DWORD WINAPI worker(LPVOID) {
             listDirty = false;
             lastList = now;
         }
-        if (storeDirty && now - lastStoreWrite > 3000) {
+        if (storeDirty && (storeUrgent || now - lastStoreWrite > 3000)) {
             if (save_store(storePath, store)) storeDirty = false;
             else logf("couldn't write %s", narrow(storePath).c_str());
+            storeUrgent = false;   // after a failed write, the next try is in 3 seconds
             lastStoreWrite = now;
         }
         // The game world is up a minute after the HUD's notifications are made, at the latest.
