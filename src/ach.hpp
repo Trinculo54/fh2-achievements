@@ -34,7 +34,6 @@ struct GameData {
     std::set<int> gauntletCampaigns;       // Storm Island's Gauntlet (IronMan) championships
     std::map<int, int> bucketList;         // bucket list challenge -> list
     std::set<int> porsches;                // car ids made by Porsche
-    std::map<int, int> perkCosts;           // game Perks table: perk id -> Skill Point cost
     // Each championship, showcase and road trip race has its weather set (AnthemEventRaces:
     // CustomWeather, WeatherPreset, WeatherPrecipitationLevel, WeatherEnvironmentWetness).
     std::set<int> rainEvents;              // it rains (precipitation above 0)
@@ -52,7 +51,6 @@ struct SaveFacts {
     std::map<std::string, std::string> objectType;         // SaveState: id -> type
     // PlayerDatabase
     std::set<int> champsCompleted, champsWon, islandChampsCompleted, islandChampsWon;
-    std::set<int> perkUnlocks;                            // PlayerDatabase perk ids already purchased
     std::map<int, int> eventPlace;                         // event -> best place (1 = won)
     std::vector<int> garage;                               // car id per garage slot
     int photos = 0;                                        // Horizon Promo cars photographed

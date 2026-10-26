@@ -259,7 +259,6 @@ bool read_player_db(const std::string& data, const std::wstring& scratch, SaveFa
         if (r[1] > 0) out.eventPlace[static_cast<int>(r[0])] = static_cast<int>(r[1]);
     });
     q("SELECT CarId FROM Career_Garage", [&](const SqlRow& r) { out.garage.push_back(static_cast<int>(r[0])); });
-    q("SELECT UnlockId FROM PerkUnlock", [&](const SqlRow& r) { out.perkUnlocks.insert(static_cast<int>(r[0])); });
     q("SELECT count(*) FROM PhotoCaptures", [&](const SqlRow& r) { out.photos = static_cast<int>(r[0]); });
     q("SELECT ChallengeId, Completed, CompletedCoop FROM BucketListProgress",
       [&](const SqlRow& r) { out.bucket[static_cast<int>(r[0])] = {r[1] != 0, r[2] != 0}; });
@@ -379,7 +378,6 @@ bool read_revision(const std::wstring& revDir, const std::wstring& scratch, cons
         out.champsWon = prev->champsWon;
         out.islandChampsCompleted = prev->islandChampsCompleted;
         out.islandChampsWon = prev->islandChampsWon;
-        out.perkUnlocks = prev->perkUnlocks;
         out.eventPlace = prev->eventPlace;
         out.garage = prev->garage;
         out.photos = prev->photos;
@@ -426,9 +424,6 @@ bool read_game_data(const std::wstring& gameDir, GameData& out, std::string& why
       [&](const SqlRow& r) { out.bucketList[static_cast<int>(r[0])] = static_cast<int>(r[1]); });
     q("SELECT Id FROM Data_Car WHERE MediaName LIKE 'POR!_%' ESCAPE '!'",
       [&](const SqlRow& r) { out.porsches.insert(static_cast<int>(r[0])); });
-    q("SELECT Id, Cost FROM Perks", [&](const SqlRow& r) {
-        out.perkCosts[static_cast<int>(r[0])] = static_cast<int>(r[1]);
-    });
     // the weather each event's race is run in (WeatherPreset 7, 8: StormB; 11-13: StormTropical)
     q("SELECT AnthemEventId, max(WeatherPrecipitationLevel > 0), max(WeatherPrecipitationLevel > 0 OR WeatherEnvironmentWetness > 0), "
       "max(WeatherPreset IN (7, 8, 11, 12, 13)) FROM AnthemEventRaces WHERE CustomWeather = 1 GROUP BY AnthemEventId",
