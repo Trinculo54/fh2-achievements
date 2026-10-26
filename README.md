@@ -60,6 +60,7 @@ A Wild Drivatar Appears! does both: bounty wins from before the mod come from th
 `fh2-mods\Achievements\` holds, for each profile:
 
 - `User_<id>.ini`: what you've unlocked and when, and the counts the mod keeps for the achievements it counts as you play. Delete it to start over.
+- `User_<id>.ini.bak`: the same file as it was when the session started. The mod only uses it if the `.ini` is damaged (after a crash or a power cut, say).
 - `Achievements.txt`: the whole list as a text file, with your progress.
 - `Achievements.log`: what the mod did this launch. A working launch reads your save ("read save revision ...") within a few seconds of the game starting. If the tile does nothing or nothing unlocks, look here, and in `fh2-mods\platform.log`.
 

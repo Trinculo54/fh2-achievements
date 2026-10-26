@@ -65,8 +65,10 @@ Files
 
   fh2-mods\Achievements.ini     settings (Popups=1, CheckUpdates=1)
   fh2-mods\Achievements\        per profile: what you've unlocked and
-                                when (User_<id>.ini), the list as text
-                                (Achievements.txt) and a log
+                                when (User_<id>.ini, with a copy from the
+                                start of the session in User_<id>.ini.bak,
+                                used only if the .ini is damaged), the list
+                                as text (Achievements.txt) and a log
 
 Delete your profile's User_<id>.ini to start over.
 
