@@ -16,7 +16,7 @@ What you've already done counts: the first time you launch, everything your save
 
 ## Install
 
-You'll need Forza Horizon 2 running on PC through Azimuth. Download the latest zip from the [Releases](../../releases) page, close Azimuth, and extract the zip into your Azimuth folder, the one with `azimuth.exe` in it. You should end up with `d3dcompiler_47.dll` next to `azimuth.exe` and `Achievements.dll` inside a `fh2-mods` folder. Start the game.
+You'll need Forza Horizon 2 running on PC through Azimuth, from 0.9.10 to 1.0.3. Download the latest zip from the [Releases](../../releases) page, close Azimuth, and extract the zip into your Azimuth folder, the one with `azimuth.exe` in it. You should end up with `d3dcompiler_47.dll` and `DWrite.dll` next to `azimuth.exe`, and `Achievements.dll` inside a `fh2-mods` folder. Start the game.
 
 ### Updates
 
@@ -24,13 +24,17 @@ When a newer version is out, the title screen says so next to "PRESS (A) TO STAR
 
 ### Using it with other FH2 mods
 
-`d3dcompiler_47.dll` is the [FH2 Mod Platform](https://github.com/Trinculo54/FH2-Mod-Platform), the shared base for FH2 mods. It loads every mod in the `fh2-mods` folder and lets them hook the game without stepping on each other. Every mod built on it ships the same file, so you can install them in any order and let them overwrite it. Achievements needs platform 2.7.0 or newer for its list and the tile (its zip has 2.7.1); [WreckingBall](https://github.com/Trinculo54/WreckingBall), [WheresMyBuddy](https://github.com/Trinculo54/WheresMyBuddy) and [FH2 Universal Radio](https://github.com/Trinculo54/FH2-Universal-Radio) are built on it too.
+`d3dcompiler_47.dll` and `DWrite.dll` are the same file: the [FH2 Mod Platform](https://github.com/Trinculo54/FH2-Mod-Platform), the shared base for FH2 mods. Azimuth 1.0.3 loads `DWrite.dll`, older versions `d3dcompiler_47.dll`, and where both load only one of them runs. It loads every mod in the `fh2-mods` folder and lets them hook the game without stepping on each other. Every mod built on it ships the same files, so you can install them in any order and let them overwrite them; just keep the newest platform in place. Achievements needs platform 2.7.0 or newer for its list and the tile (its zip has 2.8.0). If another mod's zip puts an older platform back, the title screen says "Old FH2 Mod Platform: reinstall Achievements" under "PRESS (A) TO START", and reinstalling it fixes that. [WreckingBall](https://github.com/Trinculo54/WreckingBall), [WheresMyBuddy](https://github.com/Trinculo54/WheresMyBuddy) and [FH2 Universal Radio](https://github.com/Trinculo54/FH2-Universal-Radio) are built on it too.
 
-**Playing with a racing wheel.** [fh2wheel](https://github.com/iamAzoDx/fh2wheel) ships its own `D3DCOMPILER_47.dll`, and only one can sit next to `azimuth.exe`. Install fh2wheel first, then extract this zip and let its `d3dcompiler_47.dll` overwrite fh2wheel's. Keep `fh2wheel.dll` and `fh2wheel-config.exe` next to `azimuth.exe`: the platform loads fh2wheel itself.
+**Playing with a racing wheel.** [fh2wheel](https://github.com/iamAzoDx/fh2wheel) ships its own `D3DCOMPILER_47.dll`, and only one can sit next to `azimuth.exe`. Install fh2wheel first, then extract this zip and let its `d3dcompiler_47.dll` overwrite fh2wheel's. Keep `fh2wheel.dll` and `fh2wheel-config.exe` next to `azimuth.exe`: the platform loads fh2wheel itself. Azimuth 1.0.3 doesn't load any `d3dcompiler_47.dll`, so fh2wheel's own loader doesn't run there, but the platform's `DWrite.dll` still loads `fh2wheel.dll`.
 
 ### On Linux (Wine or Proton)
 
-From 1.0.1 it works as it does on Windows. 1.0.0 read your save with Windows' built-in SQLite (`winsqlite3.dll`), which Wine and Proton don't have, so on Linux it never unlocked anything and its log said "winsqlite3.dll isn't available". Achievements you earned in the meantime are in your save, and 1.0.1 unlocks them on its first launch. Getting FH2 mods running on Linux in general is covered in the platform's [Linux notes](https://github.com/Trinculo54/FH2-Mod-Platform/blob/main/docs/linux.md).
+From 1.0.1 it works as it does on Windows. 1.0.0 read your save with Windows' built-in SQLite (`winsqlite3.dll`), which Wine and Proton don't have, so on Linux it never unlocked anything and its log said "winsqlite3.dll isn't available". Achievements you earned in the meantime are in your save, and 1.0.1 unlocks them on its first launch. On Azimuth 1.0.3 the platform is `DWrite.dll`, and Wine has its own copy of that: if `fh2-mods\platform.log` never appears, add `dwrite` to the DLL override, `WINEDLLOVERRIDES="winmm,dwrite=n,b"`. Getting FH2 mods running on Linux in general is covered in the platform's [Linux notes](https://github.com/Trinculo54/FH2-Mod-Platform/blob/main/docs/linux.md).
+
+### Uninstall
+
+Delete `fh2-mods\Achievements.dll`, `fh2-mods\Achievements.ini` and the `fh2-mods\Achievements` folder. Delete `d3dcompiler_47.dll`, `DWrite.dll` and `fh2-mods` too if no other FH2 mods use them.
 
 ## What counts
 
@@ -63,6 +67,8 @@ A Wild Drivatar Appears! does both: bounty wins from before the mod come from th
 - `User_<id>.ini.bak`: the same file as it was when the session started. The mod only uses it if the `.ini` is damaged (after a crash or a power cut, say).
 - `Achievements.txt`: the whole list as a text file, with your progress.
 - `Achievements.log`: what the mod did this launch. A working launch reads your save ("read save revision ...") within a few seconds of the game starting. If the tile does nothing or nothing unlocks, look here, and in `fh2-mods\platform.log`.
+
+If there's no `Achievements.log` at all, the platform isn't loading: check that `d3dcompiler_47.dll` and `DWrite.dll` are both next to `azimuth.exe` (Azimuth 1.0.3 only loads `DWrite.dll`). The first line of `platform.log` says which platform version is running, and `fh2-mods\platform-standby.log` means a second copy stood down for it. The list, the tile and the MODS tab come from files the platform gives the game through the `mediaoverride` folder. Platform 2.7.3 and newer make the game read that folder when Extra Options isn't installed; with Extra Options, its `EnableMediaOverrides=1` in `FH2_ExtraOptions.ini` does it, so keep that on.
 
 ## Build from source
 
