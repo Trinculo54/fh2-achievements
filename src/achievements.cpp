@@ -908,7 +908,9 @@ DWORD WINAPI worker(LPVOID) {
 }  // namespace
 
 FH2MOD_EXPORT int fh2mod_init(const FH2ModApi* api) {
-    if (!api || api->api_version < 7) return 1;
+    // Only API 1 (register_mod, log, azimuth_dir, game_dir) until the version check below, so an
+    // older platform from another mod's zip still shows "Old FH2 Mod Platform: reinstall Achievements".
+    if (!api) return 1;
     g_api = api;
     g_t0 = GetTickCount64();
     // settings, with a commented file the first time
@@ -945,6 +947,17 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi* api) {
     HANDLE h = CreateFileW(g_logPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
     logf("Achievements %s", ACH_VERSION);
+    if (api->api_version < 7) {
+        // Platforms 2.0 to 2.5. Registering has put the notice on the title screen; returning 0
+        // lets 2.5's MODS tab say "It needs FH2 Mod Platform 2.8.0 or newer" too.
+        static const char kOld[] = "needs FH2 Mod Platform 2.6.0 or newer (2.7.0 for the list and the tile), so it's "
+                                   "off. An older platform from another mod's zip is running: extract Achievements' "
+                                   "zip again to get the platform it comes with.";
+        api->log(g_mod, kOld);
+        logf("%s", kOld);
+        flush_log();
+        return 0;
+    }
 
     g_popupsOn = GetPrivateProfileIntW(L"Achievements", L"Popups", 1, g_iniPath.c_str()) != 0;
     FH2Setting s{};
