@@ -930,6 +930,9 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi* api) {
     info.platform_version = FH2MOD_PLATFORM_VERSION;
     info.description      = "Forza Horizon 2's 88 achievements, earned offline, with the game's own pop-up. Progress "
                             "already in your save counts. The pause menu's ACHIEVEMENTS tile lists them all.";
+    // Platform 2.8.0 can keep a mod out of online play. This one has to load there: the online
+    // achievements only count in FH2MP sessions. Older platforms ignore the member.
+    info.offline_only     = 0;
     g_mod = api->register_mod(&info);
     if (!g_mod) return 1;
 
