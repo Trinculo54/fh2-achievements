@@ -63,7 +63,15 @@ car achievements (Fiesta Fun, Galant Great, Metro Master, Ranger Rock
 Star, Stadium Star) and the Porsche Expansion's event and skill ones.
 
 16 achievements need online play (multiplayer, clubs, Rivals, Showdowns,
-co-op Bucket Lists). They're listed as ONLINE ONLY.
+co-op Bucket Lists). They're listed as ONLINE ONLY. Online play works
+again through FH2MP, and 13 of them are tracked there; Bragging Rights,
+Loyal, Horizon 5-0 and Cup Car count from the moment the mod is
+installed, and online races in a Porsche count for the Porsche ones too.
+The three that need Showdowns can't be earned yet, and Yes We Can,
+Castaways and Horizon 5-0 only move if FH2MP offers co-op Bucket Lists
+and online events on Storm Island. With FH2MP installed, leave "Load when
+playing online" On (Pause > Settings > MODS > Installed mods >
+Achievements), or nothing is counted online.
 
 
 Files
