@@ -13,7 +13,8 @@ Project page and source: https://github.com/Trinculo54/fh2-achievements
 Requirements
 ~~~~~~~~~~~~
 
-  - Forza Horizon 2 running through Azimuth, from 0.9.10 to 1.0.3.
+  - Forza Horizon 2 running through Azimuth (from Azimuth 1.0.3, the
+    platform is the DWrite.dll in this zip).
 
 
 Install
@@ -32,11 +33,15 @@ d3dcompiler_47.dll and DWrite.dll are the same file: the FH2 Mod
 Platform, the shared base for FH2 mods
 (https://github.com/Trinculo54/FH2-Mod-Platform). Azimuth 1.0.3 loads
 DWrite.dll, older versions d3dcompiler_47.dll. It loads every mod in
-fh2-mods, and every mod built on it ships the same files, so it's fine to
-overwrite them with a newer copy. The list and the tile need platform
-2.7.0 or newer (this zip has 2.8.0). If the title screen says "Old FH2
-Mod Platform: reinstall Achievements", another mod's zip put an older
-platform back: extract this zip again.
+fh2-mods. Each mod's zip ships the platform it was built with, and older
+ones only have d3dcompiler_47.dll, so extract this zip last, or extract
+it again after installing a mod with an older platform. The list and the
+tile need platform 2.7.0 or newer (this zip has 2.8.0). If the title
+screen says "Old FH2 Mod Platform: reinstall Achievements", another
+mod's zip put an older platform back. With a platform older than 2.6.0
+(WheresMyBuddy 1.7.0's zip has 2.5.0), Achievements doesn't start at
+all, and its log says it "needs FH2 Mod Platform 2.6.0 or newer".
+Either way, extract this zip again.
 
 
 In the game
@@ -93,13 +98,27 @@ When a newer version is out, the title screen says so after
 If it doesn't work
 ~~~~~~~~~~~~~~~~~~
 
-  - No fh2-mods\Achievements\Achievements.log at all: the platform isn't
-    loading. Check that d3dcompiler_47.dll and DWrite.dll are both next
-    to azimuth.exe (Azimuth 1.0.3 only loads DWrite.dll). The first line
-    of fh2-mods\platform.log says which platform version is running.
+  - fh2-mods\Achievements\Achievements.log says "needs FH2 Mod Platform
+    2.6.0 or newer": another mod's zip put an older platform back.
+    Extract this zip again.
+  - No Achievements.log at all, or one that wasn't written at this
+    launch (check its time): the platform isn't loading Achievements.
+    Check that d3dcompiler_47.dll and DWrite.dll are both next to
+    azimuth.exe (Azimuth 1.0.3 only loads DWrite.dll), and
+    Achievements.dll is in fh2-mods. The first line of
+    fh2-mods\platform.log says which platform version is running. If
+    fh2-mods\platform-standby.log is from your last launch, an older
+    platform from another mod's zip ran instead of this one: extract
+    this zip again. (That file stays once it's written, so check its
+    date.)
   - The tile does nothing and there's no MODS tab: these come through
     the mediaoverride folder. With Extra Options installed, keep
-    EnableMediaOverrides=1 in FH2_ExtraOptions.ini.
+    EnableMediaOverrides=1 in FH2_ExtraOptions.ini, and check that the
+    second line of FH2_ExtraOptions.log starts with OK. If it starts
+    with REFUSED (for example "unsupported Azimuth build") or DISABLED,
+    Extra Options changed nothing, so nothing reads mediaoverride:
+    install the Extra Options release made for your Azimuth version, or
+    remove its winmm.dll so the platform reads the folder itself.
   - On Linux (Wine or Proton) with Azimuth 1.0.3, if
     fh2-mods\platform.log never appears, add dwrite to the DLL override:
     WINEDLLOVERRIDES="winmm,dwrite=n,b"
