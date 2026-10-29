@@ -85,6 +85,10 @@ git clone --recursive https://github.com/Trinculo54/fh2-achievements
 
 How each achievement is worked out, and the game addresses the mod uses, are in the comments at the top of `src/rules.cpp` and `src/achievements.cpp`.
 
+## Thanks
+
+To [Laur1sXd](https://github.com/Laur1sXd), for the fixes to progress read from the save in [#2](https://github.com/Trinculo54/fh2-achievements/pull/2), which 1.0.2 builds on.
+
 ## License
 
 GPLv3. It includes [SQLite](https://sqlite.org) (`third_party/sqlite`), which is in the public domain. Unofficial fan-made mod; not affiliated with Playground Games, Turn 10, Microsoft or the Azimuth developers.

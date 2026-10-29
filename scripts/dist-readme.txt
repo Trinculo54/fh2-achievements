@@ -132,6 +132,13 @@ fh2-mods\Achievements folder. Delete d3dcompiler_47.dll, DWrite.dll and
 fh2-mods too if no other FH2 mods use them.
 
 
+Thanks
+~~~~~~
+
+To Laur1sXd, for the fixes to progress read from the save (pull request
+#2 on GitHub), which 1.0.2 builds on.
+
+
 License
 ~~~~~~~
 
