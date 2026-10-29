@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
 #include <sstream>
 
@@ -238,10 +239,11 @@ bool read_player_db(const std::string& data, const std::wstring& scratch, SaveFa
     }
     Sql* db = sql_open_readonly(copy, why);
     if (!db) return false;
-    std::string err;
+    // A table a save doesn't have (or can't give) is left empty and noted, rather than refusing the
+    // whole revision: that would stop every achievement, the event ones too.
     auto q = [&](const char* sql, const std::function<void(const SqlRow&)>& row) {
         std::string e;
-        if (!sql_ints(db, sql, row, e) && err.empty()) err = std::string(sql) + ": " + e;
+        if (!sql_ints(db, sql, row, e)) out.dbNotes += std::string(out.dbNotes.empty() ? "" : "; ") + sql + ": " + e;
     };
     q("SELECT CampaignId, Won FROM Career_ChampionshipsCompleted", [&](const SqlRow& r) {
         out.champsCompleted.insert(static_cast<int>(r[0]));
@@ -263,10 +265,6 @@ bool read_player_db(const std::string& data, const std::wstring& scratch, SaveFa
       [&](const SqlRow& r) { out.bucket[static_cast<int>(r[0])] = {r[1] != 0, r[2] != 0}; });
     sql_close(db);
     DeleteFileW(copy.c_str());
-    if (!err.empty()) {
-        why = "PlayerDatabase: " + err;
-        return false;
-    }
     return true;
 }
 
@@ -274,8 +272,10 @@ bool read_player_db(const std::string& data, const std::wstring& scratch, SaveFa
 
 // ---- finding the save -----------------------------------------------------------------------
 
-bool find_user_dir(const std::wstring& azimuthDir, std::wstring& userDir, std::wstring& user, std::string& why) {
+bool find_user_dir(const std::wstring& azimuthDir, std::wstring& userDir, std::wstring& user, std::string& why,
+                   int* profiles, uint64_t* written) {
     const std::wstring base = azimuthDir + L"\\data\\titles\\1A96545B\\saves\\player-1";
+    if (profiles) *profiles = 0;
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((base + L"\\User_*").c_str(), &fd);
     if (h == INVALID_HANDLE_VALUE) {
@@ -286,9 +286,13 @@ bool find_user_dir(const std::wstring& azimuthDir, std::wstring& userDir, std::w
     bool found = false;
     do {
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        // only the profiles themselves (User_ and the hex id), not copies such as "User_<id>.fresh-..."
+        const wchar_t* id = fd.cFileName + 5;
+        if (!*id || std::wcsspn(id, L"0123456789ABCDEFabcdef") != std::wcslen(id)) continue;
         WIN32_FILE_ATTRIBUTE_DATA a;
         const std::wstring rev = base + L"\\" + fd.cFileName + L"\\revisions";
         if (!GetFileAttributesExW(rev.c_str(), GetFileExInfoStandard, &a)) continue;
+        if (profiles) ++*profiles;
         if (!found || CompareFileTime(&a.ftLastWriteTime, &best) > 0) {
             best = a.ftLastWriteTime;
             userDir = base + L"\\" + fd.cFileName;
@@ -298,6 +302,7 @@ bool find_user_dir(const std::wstring& azimuthDir, std::wstring& userDir, std::w
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     if (!found) why = "no User_ folder with revisions in " + narrow(base);
+    if (written) *written = (static_cast<uint64_t>(best.dwHighDateTime) << 32) | best.dwLowDateTime;
     return found;
 }
 
@@ -378,6 +383,7 @@ bool read_revision(const std::wstring& revDir, const std::wstring& scratch, cons
         out.garage = prev->garage;
         out.photos = prev->photos;
         out.bucket = prev->bucket;
+        out.dbNotes = prev->dbNotes;
     } else if (!read_player_db(files[2], scratch, out, why)) {
         return false;
     }

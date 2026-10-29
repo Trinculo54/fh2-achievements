@@ -8,8 +8,16 @@
 //    exactly when a test save crossed 510,000, Blue.)
 //  - 168 mainland championships and 30 on Storm Island (Campaigns.CareerLocationId 0 and 1); six
 //    of the island ones are Gauntlets (race mode IronMan).
-//  - 175 mainland reward boards and 25 Storm Island bonus boards, 10 mainland barn finds and one
-//    on Storm Island (pdlc_barn_find_01), all listed in SaveState whether found or not.
+//  - 150 mainland reward boards (tracks\anthem\ribbon_00\GameObjs.xml: 50 fast travel and 100 XP,
+//    saved as discount_board_travel_### and discount_board_xp_a/b/c_###) and 25 Storm Island
+//    bonus boards (the DLC's test03 GameObjs.xml: 25 upgrade discount boards, saved as
+//    island_discount_board_upgrades_###). A smashed board's State is Collected (OnSmashed,
+//    0x14050F910). Once Storm Island's races have run, the save also lists 25
+//    discount_board_upgrades_### without the island_ prefix: copies of the island's boards that
+//    those routes keep hidden, which never become Collected, so they aren't counted. 10 mainland
+//    barn finds and one on Storm Island (pdlc_barn_find_01).
+//  - Main/NumSkillTokens is the total Skill Points earned. Buying a perk doesn't lower it; the
+//    balance left to spend is SaveState skills.CurrentSkillTokensTotal. The 25 perks cost 65.
 //  - Bucket lists 1-3 are the mainland's (15 challenges each: The Horizon, The Second Horizon and
 //    Beat Playground Games), 4-5 Storm Island's (8), 6 the Porsche one (10). The mainland bucket
 //    list achievements count the first two only.
@@ -35,6 +43,11 @@
 //  - Showdowns are wager races, launched from a Car Meet into a network session (the car meet
 //    states' targets are WagerRace, OnlineFreeRoam, OnlineRoadTrip...), so they need online play.
 //    Rivals races ghosts from the leaderboards, also online; RivalsEnd has [7] car, [10] credits.
+//  - Online play (it works again through FH2MP's servers), from each event's debug text in the game:
+//    RivalsEverywhereEnd (0x1409D0470) has [3] the type ("SpeedTrap"...), [4] beatRival, [5] the
+//    score; offline there's no rival ([4] 0, score -1). ClubXPWon has [3] the club and [4] the XP; it
+//    is posted from the event rewards (0x140614C10) whenever an event pays XP while you're in a club.
+//    AnthemOnlineRaceEnd's last field is the world, like the other events.
 #include "ach.hpp"
 
 #include <algorithm>
@@ -64,33 +77,42 @@ Progress Flag(bool b) { return {b ? 1.0 : 0.0, 1}; }
 constexpr double kGreenXP = 210000, kPinkXP = 810000, kPurpleXP = 1410000, kGoldXP = 2910000;
 constexpr int kTrainInVain = 92, kHorizonFinale = 201, kIslandFinale = 937;
 constexpr int kMainlandRoads = 315, kIslandRoads = 50;
+// The totals the achievements ask for, as the stock game database has them. Fixed here rather than
+// counted from the database the mod reads, because other mods change that database: one that adds
+// a championship or a challenge would otherwise put "all of them" out of reach.
+constexpr int kMainlandChamps = 168, kIslandChamps = 30, kGauntlets = 6, kCarTypes = 28;
+constexpr int kIslandChallenges = 8, kPorscheChallenges = 10, kMainlandBoards = 150, kIslandBoards = 25;
 
 bool won_event(const Facts& f, int event) {
     auto it = f.save.eventPlace.find(event);
     return (it != f.save.eventPlace.end() && it->second == 1) || f.ctr.get("won." + std::to_string(event)) > 0;
 }
 
-// Reward boards: SaveState's DiscountBoardSaveState objects, plus any smashed this session.
-struct Boards {
-    int have = 0, total = 0;
-};
-Boards boards(const Facts& f, bool island) {
-    Boards b;
+// Reward boards smashed: SaveState's DiscountBoardSaveState objects, plus any smashed this session.
+// The mainland's are the fast travel and XP boards; the island's have the island_ prefix.
+int boards(const Facts& f, bool island) {
+    int n = 0;
     for (const auto& [id, type] : f.save.objectType) {
         if (type != "DiscountBoardSaveState") continue;
-        if ((id.rfind("island_", 0) == 0) != island) continue;
-        ++b.total;
-        if (f.prop(id, "State") == "Collected" || f.live.boardsSmashed.count(id)) ++b.have;
+        const bool counts = island ? id.rfind("island_", 0) == 0
+                                   : id.rfind("discount_board_travel_", 0) == 0 || id.rfind("discount_board_xp_", 0) == 0;
+        if (counts && (f.prop(id, "State") == "Collected" || f.live.boardsSmashed.count(id))) ++n;
     }
-    return b;
+    return n;
 }
 
+bool barn_restored(const Facts& f, const std::string& id) {
+    const std::string state = f.prop(id, "State");
+    return state == "Collected" || state == "Restored";
+}
+
+// The 10 mainland barn finds; Storm Island's is pdlc_barn_find_01.
 int barns_restored(const Facts& f) {
     int n = 0;
     for (int i = 1; i <= 10; ++i) {
         char id[32];
         std::snprintf(id, sizeof id, "barn_find_%02d", i);
-        if (f.prop(id, "State") == "Restored") ++n;
+        if (barn_restored(f, id)) ++n;
     }
     return n;
 }
@@ -144,12 +166,12 @@ RULE(r_number_one) {
 }
 RULE(r_champs25) { return P(f.save.champsCompleted.size(), 25); }
 RULE(r_champs100) { return P(f.save.champsCompleted.size(), 100); }
-RULE(r_champs_all) { return P(f.save.champsCompleted.size(), f.gd.mainlandCampaigns ? f.gd.mainlandCampaigns : 168); }
+RULE(r_champs_all) { return P(f.save.champsCompleted.size(), kMainlandChamps); }
 RULE(r_champion) { return Flag(f.flag("CareerState", "WonFirstFinal") || won_event(f, kHorizonFinale)); }
 RULE(r_new_car) {
     // Bought a car since the mod was installed, or the garage holds more than the starting car
-    // and the restored barn finds (every other way into the garage is a purchase).
-    const int restored = barns_restored(f) + (f.prop("pdlc_barn_find_01", "State") == "Restored");
+    // and all restored barn finds (every other way into the garage is a purchase).
+    const int restored = barns_restored(f) + barn_restored(f, "pdlc_barn_find_01");
     return Flag(f.ctr.get("bought") > 0 || static_cast<int>(f.save.garage.size()) > restored + 1);
 }
 RULE(r_cars50) { return P(std::max<double>(f.save.garage.size(), f.stat("CompareStats/CarsInGarage")), 50); }
@@ -157,11 +179,8 @@ RULE(r_cars175) { return P(std::max<double>(f.save.garage.size(), f.stat("Compar
 RULE(r_skill5) { return P(f.stat("Main/NumSkillTokens"), 5); }
 RULE(r_skill65) { return P(f.stat("Main/NumSkillTokens"), 65); }
 RULE(r_clean100) { return P(f.ctr.get("skill.FastAndClean"), 100); }
-RULE(r_boards25) { return P(boards(f, false).have, 25); }
-RULE(r_boards_all) {
-    auto b = boards(f, false);
-    return P(b.have, b.total ? b.total : 175);
-}
+RULE(r_boards25) { return P(boards(f, false), 25); }
+RULE(r_boards_all) { return P(boards(f, false), kMainlandBoards); }
 RULE(r_roads) { return P(f.stat("CompareStats/RoadsDiscovered"), kMainlandRoads); }
 RULE(r_barns10) { return P(barns_restored(f), 10); }
 RULE(r_photos) {
@@ -198,7 +217,7 @@ RULE(r_wild_drivatar) {
 }
 
 RULE(r_car_types) {
-    return P(car_types_won(f), f.gd.mainlandBuckets.empty() ? 28 : f.gd.mainlandBuckets.size());
+    return P(car_types_won(f), kCarTypes);
 }
 // Online play: still counted from the profile's stats, in case online play comes back.
 RULE(r_rivals_credits) { return P(f.stat("CompareStats/CreditsEarnedFromRivals"), 1000000); }
@@ -209,6 +228,12 @@ RULE(r_team50) { return P(f.stat("MiscStats/OnlineTeamRacesWon"), 50); }
 RULE(r_online_trip1) { return P(f.stat("CompareStats/OnlineRoadTripDestsCompleted"), 1); }
 RULE(r_online_trip25) { return P(f.stat("CompareStats/OnlineRoadTripDestsCompleted"), 25); }
 RULE(r_coop25) { return P(bucket(f, {1, 2}).coop, 25); }
+// Speed traps where the rival on the board was beaten (RivalsEverywhereEnd's beatRival). Offline the
+// game has no rival there, so these only come from online play.
+RULE(r_bragging_rights) { return P(static_cast<double>(f.ctr.get("speedtrap.beat")), 20); }
+// Club XP: the game's ClubXPWon, sent whenever an event pays XP while you're in a club.
+RULE(r_loyal) { return P(static_cast<double>(f.ctr.get("club.xp")), 500000); }
+RULE(r_island_online50) { return P(static_cast<double>(f.ctr.get("online.island.done")), 50); }
 RULE(r_pg100) {
     return P(f.stat("MiscStats/OnlineInfectedGamesEntered") + f.stat("MiscStats/OnlineKingGamesEntered"), 100);
 }
@@ -217,39 +242,34 @@ RULE(r_pg100) {
 RULE(r_island_arrive) { return Flag(f.prop("islandiestate", "IEState") == "Complete" || f.flag("islandiestate", "HasAwardedInitialCar")); }
 RULE(r_island_won1) { return P(f.save.islandChampsWon.size(), 1); }
 RULE(r_island_won5) { return P(f.save.islandChampsWon.size(), 5); }
-RULE(r_island_all) { return P(f.save.islandChampsCompleted.size(), f.gd.islandCampaigns ? f.gd.islandCampaigns : 30); }
+RULE(r_island_all) { return P(f.save.islandChampsCompleted.size(), kIslandChamps); }
 // The game's own test for a Storm Island-ready car (before a Storm Island race it suggests the
 // Rally parts otherwise): Rally springs and dampers (level 4), Rally tyres (5), Rally
 // transmission (4). RaceStartParts sends those three levels at the start of each race.
 RULE(r_ready_to_bounce) { return Flag(f.ctr.get("island.rally.start") > 0); }
 RULE(r_island_champion) { return Flag(f.flag("CareerState", "WonFirstIslandFinal") || won_event(f, kIslandFinale)); }
+// The save only lists a Gauntlet as completed when it was won, so a finish in any place comes from
+// the profile's Island/IronManEventsEntered, which the game raises at each Gauntlet's end.
 RULE(r_gauntlet1) {
     int n = 0;
     for (int c : f.gd.gauntletCampaigns) n += f.save.islandChampsCompleted.count(c);
-    return P(n, 1);
+    return P(std::max<double>(n, f.stat("Island/IronManEventsEntered")), 1);
 }
 RULE(r_gauntlet_all) {
     int n = 0;
     for (int c : f.gd.gauntletCampaigns) n += f.save.islandChampsWon.count(c);
-    return P(n, f.gd.gauntletCampaigns.empty() ? 6 : f.gd.gauntletCampaigns.size());
+    return P(n, kGauntlets);
 }
 RULE(r_island_roads) {
     return P(f.ctr.get("island.roads.all") ? kIslandRoads : f.stat("Island/RoadsDiscovered"), kIslandRoads);
 }
 RULE(r_island_boards) {
-    auto b = boards(f, true);
-    return P(b.have, b.total ? b.total : 25);
+    return P(boards(f, true), kIslandBoards);
 }
 RULE(r_island_bucket1) { return P(bucket(f, {4, 5}).solo, 1); }
-RULE(r_island_bucket_all) {
-    auto b = bucket(f, {4, 5});
-    return P(b.solo, b.total ? b.total : 8);
-}
-RULE(r_island_coop_all) {
-    auto b = bucket(f, {4, 5});
-    return P(b.coop, b.total ? b.total : 8);
-}
-RULE(r_island_barn) { return Flag(f.prop("pdlc_barn_find_01", "State") == "Restored"); }
+RULE(r_island_bucket_all) { return P(bucket(f, {4, 5}).solo, kIslandChallenges); }
+RULE(r_island_coop_all) { return P(bucket(f, {4, 5}).coop, kIslandChallenges); }
+RULE(r_island_barn) { return Flag(barn_restored(f, "pdlc_barn_find_01")); }
 RULE(r_island_chain) { return P(f.ctr.get("chain.island.best"), 100000); }
 RULE(r_fiesta) { return P(f.ctr.get("win.car.2158"), 1); }
 RULE(r_galant) { return P(f.ctr.get("win.car.1381"), 1); }
@@ -264,10 +284,7 @@ RULE(r_porsche_owned) {
     return Flag(false);
 }
 RULE(r_porsche_bucket5) { return P(bucket(f, {6}).solo, 5); }
-RULE(r_porsche_bucket_all) {
-    auto b = bucket(f, {6});
-    return P(b.solo, b.total ? b.total : 10);
-}
+RULE(r_porsche_bucket_all) { return P(bucket(f, {6}).solo, kPorscheChallenges); }
 RULE(r_porsche40) { return P(f.ctr.get("done.porsche"), 40); }
 RULE(r_914) { return P(f.ctr.get("done.car.266"), 4); }
 RULE(r_macan) { return P(f.ctr.get("done.car.2295"), 4); }
@@ -331,11 +348,11 @@ const std::vector<Def> kDefs = {
     {"we_meet_again", "We Meet Again!", "Win a Showdown at every Car Meet.", 20, G::Base, T::Online, nullptr, nullptr},
     {"friends_with_benefits", "Friends with Benefits", "Earn a total of 1,000,000 Cr from Rivals.", 10, G::Base, T::Online, "Cr", r_rivals_credits},
     {"super_meet_boy", "Super Meet Boy", "Grab a livery, grab a tuning setup, buy a car, and enter a Showdown at any Car Meet.", 10, G::Base, T::Online, nullptr, nullptr},
-    {"bragging_rights", "Bragging Rights", "Beat Friends or Club members on any 20 Speed Cameras.", 10, G::Base, T::Online, nullptr, nullptr},
+    {"bragging_rights", "Bragging Rights", "Beat Friends or Club members on any 20 Speed Cameras.", 10, G::Base, T::Online, "speed cameras", r_bragging_rights},
     {"social_caterpillar", "Social Caterpillar", "Compete in 20 Multiplayer Events.", 10, G::Base, T::Online, "events", r_mp20},
     {"social_butterfly", "Social Butterfly", "Compete in 200 Multiplayer Events.", 50, G::Base, T::Online, "events", r_mp200},
     {"team_player", "Team Player", "Win 50 Team Events.", 30, G::Base, T::Online, "wins", r_team50},
-    {"loyal", "Loyal", "Earn 500,000 XP for your Club.", 25, G::Base, T::Online, nullptr, nullptr},
+    {"loyal", "Loyal", "Earn 500,000 XP for your Club.", 25, G::Base, T::Online, "XP", r_loyal},
     {"on_the_road_again", "On the Road Again", "Complete an Online Road Trip location.", 10, G::Base, T::Online, "locations", r_online_trip1},
     {"well_travelled", "Well Travelled", "Complete 25 Online Road Trip locations.", 30, G::Base, T::Online, "locations", r_online_trip25},
     {"yes_we_can", "Yes We Can", "Complete 25 Bucket List items co-operatively from the first two Horizon Bucket Lists.", 30, G::Base, T::Online, "challenges", r_coop25},
@@ -364,7 +381,7 @@ const std::vector<Def> kDefs = {
     {"ranger_rock_star", "Ranger Rock Star", "Win an event in the Ford Ranger.", 10, G::StormIsland, T::Events, nullptr, r_ranger},
     {"stadium_star", "Stadium Star", "Win an Event in the Robby Gordon #7 SST.", 10, G::StormIsland, T::Events, nullptr, r_sst},
     {"meet_and_beat", "Meet and Beat", "Visit the Storm Island Car Meet and win 3 Showdowns.", 20, G::StormIsland, T::Online, nullptr, nullptr},
-    {"horizon_5_0", "Horizon 5-0", "Complete 50 Online Events on Storm Island.", 30, G::StormIsland, T::Online, nullptr, nullptr},
+    {"horizon_5_0", "Horizon 5-0", "Complete 50 Online Events on Storm Island.", 30, G::StormIsland, T::Online, "events", r_island_online50},
 
     // ---- Porsche Expansion: 15, 500G ----
     {"porsche_owners_club", "Porsche Owners Club", "Obtain your first Porsche.", 25, G::Porsche, T::Save, nullptr, r_porsche_owned},
@@ -444,13 +461,37 @@ bool count_event(const Event& e, const GameData& gd, Counters& c, LiveFacts& liv
         case ev::RoadTripCreated:         // a destination picked on the Road Trip screen
             c.raise("roadtrip.chosen", 1);
             return true;
-        case ev::RivalsEnd:               // [3] event, [4] track, [7] car, [10] credits won, [11] place
+        case ev::RivalsEnd:               // [3] event, [4] track, [7] car, [10] credits won, [12] rival XUID
             if (e.i(7) != 2297 || e.i(10) <= 0) return false;
             c.add("rivals.cr.2297", e.i(10));
             return true;
+        case ev::RivalsEverywhereEnd:     // [3] type ("SpeedTrap"...), [4] beatRival, [5] score
+            if (e.s(3) != "SpeedTrap" || !e.i(4)) return false;
+            c.add("speedtrap.beat", 1);
+            return true;
+        case ev::ClubXPWon:               // [3] club, [4] XP gained
+            if (e.i(4) <= 0) return false;
+            c.add("club.xp", e.i(4));
+            return true;
+        case ev::AnthemOnlineRaceEnd: {   // an online event finished: [8] car (as in AnthemRaceEnd), last the world
+            bool counted = false;
+            if (e.world() == kWorldIsland) {
+                c.add("online.island.done", 1);
+                counted = true;
+            }
+            // Online races count for the Porsche ones too, as they did on Xbox.
+            const int64_t car = e.i(8);
+            if (gd.porsches.count(static_cast<int>(car))) {
+                c.add("done.car." + std::to_string(car), 1);
+                c.add("done.porsche", 1);
+                counted = true;
+            }
+            return counted;
+        }
         case ev::AnthemRaceEnd: {
-            // [8] car, [9] exit status (0 = finished), [10] time, [11] place (1 = won), [12] event,
-            // [14] championship.
+            // [8] car, [10] time, [11] place (1 = won), [12] event, [14] championship, [18]
+            // credits, [20] world. The game sends it from the race-end handler (0x1409CD9C0) and
+            // always passes 0 as [9]; the check below is only a guard.
             if (e.f.size() < 13 || e.i(9) != 0) return false;
             const int64_t car = e.i(8), place = e.i(11), event = e.i(12);
             const std::string cs = std::to_string(car);
