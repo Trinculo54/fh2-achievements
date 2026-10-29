@@ -89,10 +89,13 @@ Files
                                 used only if the .ini is damaged), the list
                                 as text (Achievements.txt) and a log
 
-Delete your profile's User_<id>.ini to start over.
+To start over, close the game and delete your profile's User_<id>.ini
+and User_<id>.ini.bak. (A damaged .ini is kept as User_<id>.ini.damaged
+when the mod replaces it with the .bak.)
 
-When a newer version is out, the title screen says so after
-"PRESS (A) TO START".
+When a newer version is out, the title screen says so under
+"PRESS (A) TO START". CheckUpdates=0 in Achievements.ini turns that
+check off.
 
 
 If it doesn't work
